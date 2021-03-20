@@ -1,0 +1,31 @@
+# beanbuff: Beancount Importers for Brokerage Accounts
+
+This repository contains public importers for various brokerage accounts. They
+are consolidated here in order leverage common utility functions and libraries
+between them, and to allow for analysis code that works on and across all of
+them, integrated with Beancount.
+
+## Status
+
+This is work in constant progress. It's rough around the edges and is
+specifically designed for my personal reconciliation workflow. Use it at your
+own peril or benefit.
+
+
+## Dependencies
+
+This code is built on top of [Beancount
+v3](http://github.com/beancount/beancount) and
+[Beangulp](http://github.com/beancount/beangulp).
+
+
+## Mailing-list
+
+Questions related to this code should be sent to the [Beancount
+mailing-list](https://groups.google.com/g/beancount).
+
+
+## History
+
+These codes used to live in various repositories and were consolidated here in
+March 2021.
