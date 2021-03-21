@@ -16,6 +16,10 @@ This is work in constant progress. It's rough around the edges and is
 specifically designed for my personal reconciliation workflow. Use it at your
 own peril or benefit.
 
+NOTE: Many of these importers are currently being rewritten and reconsolidated
+in order to perform centralized analysis. Therefore, some of the stuff will not
+be in working order as of March 2021.
+
 
 ## Testing
 
