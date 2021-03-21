@@ -12,7 +12,7 @@ from beanglers.tools import pdfconvert
 
 
 class Importer(identifier.IdentifyMixin, filing.FilingMixin):
-    
+
     matchers = [('mime', 'application/pdf'),
                 ('content', 'OANDA Corporation')]
 
