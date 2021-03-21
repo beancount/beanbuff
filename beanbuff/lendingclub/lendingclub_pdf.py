@@ -8,7 +8,7 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 from beangulp import testing
 
-from beanglers.tools import pdfconvert
+from beanbuff.utils import pdf
 
 
 class Importer(identifier.IdentifyMixin, filing.FilingMixin):
@@ -16,7 +16,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin):
     matchers = [('mime', 'application/pdf'),
                 ('content', 'LendingClub')]
 
-    converter = staticmethod(pdfconvert.convert_to_text)
+    converter = staticmethod(pdf.convert_pdf_to_text)
 
     def file_date(self, file):
         """Try to get the date of the report from the filename."""

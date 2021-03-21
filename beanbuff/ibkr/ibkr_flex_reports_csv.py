@@ -62,21 +62,21 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, configlib.ConfigMix
                 ('content', r'.*\bClientAccountID\b')]
 
     def extract(self, file, existing_entries=None):
-        rows = iter(csv.reader(open(file.name)))
-        header = next(rows)
-
         new_entries = []
-        for rowlist in rows:
-            row = create_row(header, rowlist)
-            description = row["ActivityDescription"]
-            for hndlr in HANDLERS:
-                if re.match(hndlr.regex, description):
-                    entry = hndlr(row, self.config)
-                    if entry:
-                        new_entries.append(entry)
-                    break
-            else:
-                raise TypeError("Unknown transaction: {}".format(description))
+        with open(file.name) as infile:
+            rows = iter(csv.reader(infile))
+            header = next(rows)
+            for rowlist in rows:
+                row = create_row(header, rowlist)
+                description = row["ActivityDescription"]
+                for hndlr in HANDLERS:
+                    if re.match(hndlr.regex, description):
+                        entry = hndlr(row, self.config)
+                        if entry:
+                            new_entries.append(entry)
+                        break
+                else:
+                    raise TypeError("Unknown transaction: {}".format(description))
         return new_entries
 
 
