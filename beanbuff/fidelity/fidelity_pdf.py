@@ -5,7 +5,7 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 from beangulp import testing
 
-from beanglers.tools import pdfconvert
+from beanbuff.utils import pdf
 
 
 class Importer(identifier.IdentifyMixin, filing.FilingMixin):
@@ -13,7 +13,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin):
     matchers = [('mime', 'application/pdf'),
                 ('content', 'Fidelity Brokerage Services')]
 
-    converter = staticmethod(pdfconvert.convert_to_text)
+    converter = staticmethod(pdf.convert_pdf_to_text)
 
 
 if __name__ == '__main__':
