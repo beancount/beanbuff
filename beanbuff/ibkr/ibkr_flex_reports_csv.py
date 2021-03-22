@@ -147,10 +147,16 @@ def create_meta():
 
 def create_transaction(row):
     """Create a transaction object."""
+    links = set()
+    links.add("ibkr-{}".format(row["TransactionID"]))
+    if "TradeID" in row:
+        links.add("ibtrade-{}".format(row["TradeID"]))
+    if "OrderID" in row:
+        links.add("iborder-{}".format(row["OrderID"]))
     return data.Transaction(
         create_meta(), row["Date"], flags.FLAG_OKAY,
         None, row["ActivityDescription"],
-        {row["ActivityCode"]}, {row["TransactionID"]}, [])
+        {row["ActivityCode"]}, links, [])
 
 
 @handler("(Opening|Closing|Starting|Ending) Balance")
@@ -192,11 +198,21 @@ def create_interest_income(row, config) -> data.Balance:
 def create_trade(row, config) -> data.Balance:
     """Create proper trading transactions."""
     txn = create_transaction(row)
-    account = accountlib.join(config["root"], row["Symbol"])
+    underlying, symbol = parse_symbol(row["Symbol"], row["AssetClass"])
+
+    if row["AssetClass"] == 'OPT':
+        account = accountlib.join(config["root"], 'Options')
+        quantity = 100 * row["TradeQuantity"]
+    else:
+        account = accountlib.join(config["root"], underlying)
+        quantity = row["TradeQuantity"]
     currency = row["CurrencyPrimary"]
+
+    # Note: Somehow some of the commissions are negative. Must be some discount
+    # thing, I have no idea.
     txn.postings.extend([
         data.Posting(account,
-                     Amount(row["TradeQuantity"], row["Symbol"]),
+                     Amount(quantity, symbol),
                      position.Cost(row["TradePrice"], currency, None, None),
                      None, None, None),
         data.Posting(config["asset_cash"],
@@ -240,6 +256,23 @@ def create_funds_transfer(row, config) -> data.Balance:
                      None, None, None, None),
     ])
     return txn
+
+
+def parse_symbol(string: str, asset_class: str) -> Tuple[str, str]:
+    """Parse the symbol to a TD sym."""
+
+    if asset_class == 'STK':
+        return string, string
+    elif asset_class == 'OPT':
+        # Example: 'URA   210416C00022000'
+        underlying = string[0:6].rstrip()
+        ymd = string[6:12]
+        side = string[12]
+        strike = Decimal(string[13:])/1000
+        return underlying, f"{underlying}_{ymd}{side}{strike}"
+    else:
+        raise NotImplementedError("Unsupported asset class")
+
 
 
 if __name__ == '__main__':
