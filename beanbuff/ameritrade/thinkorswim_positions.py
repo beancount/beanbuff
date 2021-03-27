@@ -212,8 +212,15 @@ def main(positions_csv, reference):
 
     # Read positions statement and consolidate it.
     table = petl.fromcsv(positions_csv)
+    #print(table.lookallstr())
     atable, totals = ConsolidatePositionStatement(table, reference)
     Report(atable, totals, 10)
+
+    # TODO(blais): Compute beta-weighted adjusted values yourself.
+    # TODO(blais): Add % BP per trade, should be 3-5%.
+    # TODO(blais): Render total % BP used and available, should be 35%.
+    # TODO(blais): Compute notional equivalent exposure.
+    # TODO(blais): Add correlation matrix between the major asset classes (oil, bonds, stocks, etc.).
 
 
 if __name__ == '__main__':
