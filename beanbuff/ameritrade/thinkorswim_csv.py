@@ -1,7 +1,12 @@
-"""Think-or-Swim platform transaction detail importer.
+"""Think-or-Swim "Account Statement" CSV detail importer.
 
-This code parses the file that can be downloaded from the Think-or-Swim
-application from the Activity page.
+Instructions:
+- Start TOS
+- Go to the "Monitor" tab
+- Select the "Account Statement" page
+- Select the desired time period
+- Right on the rightmost hamburger menu and select "Export to File..."
+
 """
 import csv
 import re
@@ -10,8 +15,9 @@ import datetime
 import collections
 import typing
 import logging
-from typing import Any, Union, List
+from typing import Any, Dict, Union, List
 from decimal import Decimal
+from functools import partial
 
 from dateutil import parser
 import petl
@@ -75,83 +81,326 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
 
     def extract(self, file):
         """Import a CSV file from Think-or-Swim."""
-        filename = file.name
+        tables = PrepareTables(file.name)
 
-        handlers = {
-            'Cash Balance': ProcessCashBalance,
-            'Futures Statements': ProcessFuturesStatements,
-            'Forex Statements': ProcessForexStatements,
-        }
+        cash_full = tables['Cash Balance']
+        trades_equity = (tables['Account Trade History']
+                         .addfield('quantity', lambda r: abs(r.qty)))
 
-        new_entries = []
-        with open(filename, encoding='utf8') as infile:
-            sections = csv_utils.csv_split_sections_with_titles(csv.reader(infile))
-            for section_name, rows in sections.items():
-                handler = handlers.get(section_name, None)
-                if handler:
-                    header = csv_utils.csv_clean_header(rows[0])
-                    rows[0] = header
-                    table = petl.wrap(rows)
-                    entries = handler(table, filename, self.config)
-                    if entries:
-                        new_entries.extend(entries)
+        # Split the cash statement between simple cash effects vs. trades,
+        # expirations and dividend events.
+        cash_other = cash_full.select(lambda r: not r.strategy)
+        cash_trades = cash_full.select(lambda r: bool(r.strategy))
 
-        return new_entries
+        # Check that the non-trade cash statement transactions have no overlap
+        # whatsoever with the trades on.
+        keyed_cash = cash_other.aggregate('datetime', list)
+        keyed_trades = trades_equity.aggregate('exec_time', list)
+        joined = petl.join(keyed_cash, keyed_trades,
+                           lkey='datetime', rkey='exec_time',
+                           lprefix='cash', rprefix='trade')
+        if joined.nrows() != 0:
+            raise ValueError("Cash statement table contains trade data: {}".format(joined))
+
+        # Pair up the trades from the cash statement with the trades from the
+        # equity trades table.
+        keyed_cash_trades = cash_trades.aggregate(('datetime', 'symbol', 'quantity'), list)
+        keyed_trades = trades_equity.aggregate(('exec_time', 'symbol', 'quantity'), list)
+        joined_trades = petl.join(keyed_cash_trades, keyed_trades,
+                                  lkey=('datetime', 'symbol', 'quantity'),
+                                  rkey=('exec_time', 'symbol', 'quantity'),
+                                  lprefix='c_', rprefix='t_')
+        for datetime, symbol, quantity, cash_rows, trade_rows in joined_trades.skip(1):
+            print(datetime)
+            for row in cash_rows:
+                print(row)
+            for row in trade_rows:
+                print(row)
+            print()
+
+            # Check for collisions against the unique key.
+            #
+            # Please note that linked orders sent through the Pairs Trader tool
+            # will have consecutive ids and the same date/time, but we
+            # disambiguate them using hte underlying in the join key.
+            #
+            # Sometimes we have multiple order ids split up with equivalent
+            # trades and so if the descriptions match up exactly we accept
+            # those.
+            order_ids = {row.order_id for row in trade_rows}
+            descriptions = {row.description for row in cash_rows}
+            if len(order_ids) != 1 and len(descriptions) != 1:
+                message = ("Conflict: More than a single order matched a "
+                           "cash line: {}".format(order_ids))
+                logging.error(message)
+                raise ValueError(message)
+
+        # new_entries = []
+        # if entries:
+        #     new_entries.extend(entries)
+        # return new_entries
         #return process_cash(sections['Cash Balance'], filename, self.config, flag=self.FLAG)
 
 
-Description = typing.NamedTuple("Description", [
-    ('side', str),
-    ('quantity', Decimal),
-    ('strategy', str),
-    ('underlying', str),
-    ('option', str),
-    ('price', str),
-    ('venue', str),
-])
+def PrepareTables(filename: str) -> Dict[str, Table]:
+    """Read and prepare all the tables to be joined."""
 
-
-def ParseDescription(row: petl.Record) -> Description:
-    if not row.type == 'TRD':
-        return
-
-    # Parse the front, up to, including the strategi.
-    strategies = {
-        'VERTICAL',
-        'VERT ROLL',
-        'CALENDAR',
-        'DIAGONAL',
-        '1/-1/1/-1 CUSTOM',
+    # Handlers for each of the sections.
+    handlers = {
+        'Cash Balance': CashBalance_Prepare,
+        'Futures Statements': FuturesStatements_Prepare,
+        'Forex Statements': None,
+        'Account Order History': None,
+        'Account Trade History': AccountTradeHistory_Prepare,
+        'Equities': None,
+        'Options': None,
+        'Futures': None,
+        'Futures Options': None,
+        'Profits and Losses': None,
+        'Forex Account Summary': None,
+        'Account Summary': None,
     }
-    match = re.match(
-        r'(BOT|SOLD) ([+-][\d.,]+)(?: ({}))? (.*)'.format('|'.join(strategies)),
-        row.description)
-    side = 'BUY' if match.group(1) == 'BOT' else 'SELL'
-    quantity = Decimal(match.group(2).replace(',', ''))
-    strategy = match.group(3)
-    rest = match.group(4)
 
-    # Parse out the price and the exchange, if any.
-    match = re.search("(.*) @(-?[0-9.]+)( [A-Z ]+)?$", rest)
-    assert match, rest
-    rest = match.group(1)
-    price = Decimal(match.group(2).replace(',', ''))
-    venue = match.group(3)
+    # Read the CSV file.
+    prepared_tables = {}
+    with open(filename, encoding='utf8') as infile:
+        # Iterate through the sections.
+        sections = csv_utils.csv_split_sections_with_titles(csv.reader(infile))
+        for section_name, rows in sections.items():
+            handler = handlers.get(section_name, None)
+            if not handler:
+                continue
+            header = csv_utils.csv_clean_header(rows[0])
+            rows[0] = header
+            table = petl.wrap(rows)
+            ptable = handler(table)
+            if ptable is None:
+                continue
+            prepared_tables[section_name] = ptable
 
-    # If the strategy isn't explicit, infer it from the instrument name.
-    if not strategy:
-        match = re.fullmatch("(/?[A-Z0-9]+(?::[A-Z]+)?)", rest)
-        if match:
-            assert strategy is None
-            strategy = 'FUTURE' if rest.startswith('/') else 'EQUITY'
-        else:
-            strategy = 'SINGLE'
-    assert strategy
-    description = rest.strip()
+    return prepared_tables
 
-    underlying, option = TranslateInstrument(description)
 
-    return Description(side, quantity, strategy, underlying, option, price, venue)
+def ParseDateTimePair(date_field: str, time_field: str, rec: Record) -> datetime.date:
+    """Parse a pair of date and time fields."""
+    return datetime.datetime.strptime(
+        "{} {}".format(getattr(rec, date_field), getattr(rec, time_field)),
+        '%m/%d/%y %H:%M:%S')
+
+
+
+def ParseDescription(row: Record) -> Dict[str, Any]:
+    """Parse the description field to a dict."""
+    if row.type == 'TRD':
+        return _ParseTradeDescription(row.description)
+    if row.type == 'RAD':
+        if row.description.startswith('REMOVAL OF OPTION'):
+            return _ParseExpirationDescription(row.description)
+    if row.type == 'DOI':
+        if re.match('.* DIVIDEND', row.description):
+            return _ParseDividendDescription(row.description)
+    return {}
+
+
+def _ParseTradeDescription(description: str) -> Dict[str, Any]:
+    """Parse the description field of a trade."""
+
+    regexp = "".join([
+        "(?P<side>BOT|SOLD) ",
+        "(?P<quantity>[+-]?[0-9.,]+) ",
+        "(?P<rest>.*?)",
+        "(?P<price> @-?[0-9.]+)?",
+        "(?P<venue> [A-Z]+(?: GEMINI)?)?",
+        "$",
+    ])
+    match = re.match(regexp, description)
+    assert match, description
+    matches = match.groupdict()
+    matches['side'] = 'BUY' if matches['side'] == 'BOT' else 'SELL'
+    matches['quantity'] = abs(ToDecimal(matches['quantity']))
+    quantity = matches['quantity']
+    matches['price'] = ToDecimal(matches['price'].lstrip(" @")) if matches['price'] else ''
+    matches['venue'] = matches['venue'].lstrip() if matches['venue'] else ''
+    rest = matches.pop('rest')
+
+    # Pieces of regexps used below in matching the different strategies.
+    underlying = "(?P<underlying>[A-Z]+)"
+    underlying2 = "(?P<underlying2>[A-Z]+)"
+    multiplier = "(?P<multiplier>[0-9]+)"
+    suffix = "(?P<suffix>\([A-Za-z]+\))"
+    expdate = "\d+ [A-Z]{3} \d+(?: \[[A-Z]+\])?"
+    expdatef = f"(?P<expdate>{expdate})?"
+    strike = "[0-9.]+"
+    pc = "(?:PUT|CALL)"
+    putcall = "(?P<putcall>PUT|CALL)"
+    putcalls = "(?P<putcalls>PUT/CALL|CALL/PUT)"
+    size = "[+-]?[0-9,.]+"
+
+    # NOTE: You could easily handle each of the strategies below and expand to
+    # all the options legs, like this:
+    #   strikes = [ToDecimal(strike) for strike in submatches.pop('strikes').split('/')]
+    #   options = []
+    #   for strike in strikes:
+    #       option = submatches.copy()
+    #       option['strike'] = strike
+    #       options.append(option)
+    # or
+    #    matches['expiration'] = parser.parse(matches['expiration']).date()
+    #    matches['strike'] = Decimal(matches['strike'])
+    #    matches['multiplier'] = Decimal(matches['multiplier'])
+    #    matches['quantity'] = Decimal(matches['quantity'])
+
+    # VERTICAL SPY 100 (Weeklys) 8 JAN 21 355/350 PUT
+    match = re.match(f"(?P<strategy>VERTICAL) {underlying} {multiplier}(?: {suffix})? {expdatef} "
+                     f"(?P<strikes>{strike}/{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # IRON CONDOR NFLX 100 (Weeklys) 5 FEB 21 502.5/505/500/497.5 CALL/PUT
+    match = re.match(f"(?P<strategy>IRON CONDOR) {underlying} {multiplier}(?: {suffix})? "
+                     f"{expdatef} "
+                     f"(?P<strikes>{strike}/{strike}/{strike}/{strike}) {putcalls}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # CONDOR NDX 100 16 APR 21 [AM] 13500/13625/13875/13975 CALL
+    match = re.match(f"(?P<strategy>CONDOR) {underlying} {multiplier}(?: {suffix})? "
+                     f"{expdatef} "
+                     f"(?P<strikes>{strike}/{strike}/{strike}/{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # 2/2/1/1 ~IRON CONDOR RUT 100 16 APR 21 [AM] 2230/2250/2150/2055 CALL/PUT
+    match = re.match(f"(?P<size>{size}/{size}/{size}/{size}) (?P<strategy>~IRON CONDOR) "
+                     f"{underlying} {multiplier}(?: {suffix})? {expdatef} "
+                     f"(?P<strikes>{strike}/{strike}/{strike}/{strike}) {putcalls}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # 1/-1/1/-1 CUSTOM SPX 100 (Weeklys) 16 APR 21/16 APR 21 [AM]/19 MAR 21/19 MAR 21 3990/3980/4000/4010 CALL/CALL/CALL/CALL @-.80
+    match = re.match(f"(?P<size>{size}/{size}/{size}/{size}) (?P<strategy>CUSTOM) "
+                     f"{underlying} {multiplier}(?: {suffix})? "
+                     f"(?P<expdate>{expdate}/{expdate}/{expdate}/{expdate}) "
+                     f"(?P<strikes>{strike}/{strike}/{strike}/{strike}) "
+                     f"(?P<putcalls>{pc}/{pc}/{pc}/{pc})$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'] + "4", 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # 5/-4 CUSTOM SPX 100 16 APR 21 [AM]/16 APR 21 [AM] 3750/3695 PUT/PUT
+    match = re.match(f"(?P<size>{size}/{size}) (?P<strategy>CUSTOM) "
+                     f"{underlying} {multiplier}(?: {suffix})? "
+                     f"(?P<expdate>{expdate}/{expdate}) "
+                     f"(?P<strikes>{strike}/{strike}) "
+                     f"(?P<putcalls>{pc}/{pc})$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'] + "2", 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # BUTTERFLY GS 100 (Weeklys) 5 FEB 21 300/295/290 PUT
+    match = re.match(f"(?P<strategy>BUTTERFLY) {underlying} {multiplier}(?: {suffix})? "
+                     f"{expdatef} "
+                     f"(?P<strikes>{strike}/{strike}/{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # VERT ROLL NDX 100 (Weeklys) 29 JAN 21/22 JAN 21 13250/13275/13250/13275 CALL
+    match = re.match(f"(?P<strategy>VERT ROLL) {underlying} {multiplier}(?: {suffix})? "
+                     f"(?P<expdate>{expdate}/{expdate}) "
+                     f"(?P<strikes>{strike}/{strike}/{strike}/{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # DIAGONAL SPX 100 (Weeklys) 16 APR 21/16 APR 21 [AM] 3990/3995 CALL
+    match = re.match(f"(?P<strategy>DIAGONAL) {underlying} {multiplier}(?: {suffix})? "
+                     f"(?P<expdate>{expdate}/{expdate}) "
+                     f"(?P<strikes>{strike}/{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # CALENDAR SPY 100 16 APR 21/19 MAR 21 386 PUT
+    match = re.match(f"(?P<strategy>CALENDAR) {underlying} {multiplier}(?: {suffix})? "
+                     f"(?P<expdate>{expdate}/{expdate}) "
+                     f"(?P<strikes>{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # STRANGLE NVDA 100 (Weeklys) 1 APR 21 580/520 CALL/PUT
+    match = re.match(f"(?P<strategy>STRANGLE) {underlying} {multiplier}(?: {suffix})? "
+                     f"{expdatef} "
+                     f"(?P<strikes>{strike}/{strike}) {putcalls}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # COVERED LIT 100 16 APR 21 64 CALL/LIT
+    match = re.match(f"(?P<strategy>COVERED) {underlying} {multiplier}(?: {suffix})? "
+                     f"{expdatef} "
+                     f"(?P<strikes>{strike}) {putcall}/{underlying2}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': sub['strategy'], 'quantity': quantity, 'symbol': sub['underlying2']}
+
+    # GAMR 100 16 APR 21 100 PUT
+    match = re.match(f"{underlying} {multiplier}(?: {suffix})? {expdatef} "
+                     f"(?P<strikes>{strike}) {putcall}$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': 'SINGLE', 'quantity': quantity, 'symbol': sub['underlying']}
+
+    # EWW
+    match = re.match(f"{underlying}$$", rest)
+    if match:
+        sub = match.groupdict()
+        return {'strategy': 'EQUITY', 'quantity': quantity, 'symbol': sub['underlying']}
+
+    message = "Unknown description: {}".format(description)
+    raise ValueError(message)
+
+
+def _ParseExpirationDescription(description: str) -> Dict[str, Any]:
+    """Parse the description field of an expiration."""
+    regexp = "".join([
+        "REMOVAL OF OPTION DUE TO EXPIRATION ",
+        "(?P<quantity>[+-]?[0-9.]+) ",
+        "(?P<underlying>[A-Z/:]+) ",
+        "(?P<multiplier>\d+) ",
+        "(?P<suffix>\(.*\) )?",
+        "(?P<expiration>\d+ [A-Z]{3} \d+) ",
+        "(?P<strike>[0-9.]+) ",
+        "(?P<side>PUT|CALL)",
+    ])
+    match = re.match(regexp, description)
+    assert match, description
+    matches = match.groupdict()
+    matches['expiration'] = parser.parse(matches['expiration']).date()
+    matches['strike'] = Decimal(matches['strike'])
+    matches['multiplier'] = Decimal(matches['multiplier'])
+    matches['quantity'] = Decimal(matches['quantity'])
+    return {'strategy': 'EXPIRATION',
+            'quantity': Decimal('0'),
+            'symbol': matches['underlying']}
+
+
+def _ParseDividendDescription(description: str) -> Dict[str, Any]:
+    """Parse the description field of an expiration."""
+    match = re.match("ORDINARY (?P<strategy>DIVIDEND)~(?P<symbol>[A-Z0-9]+)", description)
+    assert match, description
+    matches = match.groupdict()
+    matches['quantity'] = Decimal('0')
+    return matches
+
+
+def CleanDescriptionPrefixes(string: str) -> str:
+    return re.sub('(WEB:AA_[A-Z]+|tAndroid) ', '', string)
 
 
 def RemoveDashEmpty(value: str) -> str:
@@ -163,8 +412,12 @@ def ToDecimal(value: str) -> Union[Decimal, str]:
 
 
 def TranslateInstrument(inst_string: str):
-    if not inst_string:
-        return ''
+    # Simple option.
+    print(inst_string)
+    match = re.match(r"([A-Z0-9]+) (\d+)( \([A-Za-z]+\))? (\d+ [A-Z]+ \d+) (.*) (PUT|CALL)",
+                     inst_string)
+    print(match.groups())
+
 
     # Simple future.
     futsym = r"/([A-Z]{2}[A-Z0-9]+)(?::X(?:CME|CEC|NYM))?( .*)?"
@@ -189,70 +442,164 @@ def TranslateInstrument(inst_string: str):
     return underlying, option
 
 
-def PrepareTable(table: Table, date_field, time_field) -> Table:
-    table = (
-        table
-        .select('description',
-                lambda v: v != 'TOTAL')
-        .addfield('datetime',
-                  lambda r: datetime.datetime.strptime("{} {}".format(
-                      getattr(r, date_field), getattr(r, time_field)
-                  ), '%m/%d/%y %H:%M:%S'))
-        .cutout(date_field, time_field)
-        # .select('description',
-        #         lambda v: not re.match(r'Cash balance at the start of business day', v))
-        .convert('description',
-                 lambda v: re.sub('WEB:AA_[A-Z]+ ', '', v))
-        .convert('ref', RemoveDashEmpty)
-        .convert('misc_fees', RemoveDashEmpty)
-        .convert('commissions_fees', RemoveDashEmpty)
-        .convert('amount', RemoveDashEmpty)
-        .convert(('balance', 'amount', 'misc_fees', 'commissions_fees'), ToDecimal)
-    )
+#-------------------------------------------------------------------------------
+# Cash Balance
 
-    # Insert down fields from the description.
-    new_fields = [(name, lambda r, n=name: getattr(r._, n, ''))
-                  for name in Description._fields]
+def CashBalance_Prepare(table: Table) -> Table:
+    """Process the cash account statement balance."""
+
     table = (
         table
-        .addfield('_', ParseDescription)
-        .addfields(new_fields)
-        .cutout('_')
+
+        # Remove bottom totals line.
+        .select('description', lambda v: v != 'TOTAL')
+        # Clean up uselesss prefixed from the descriptions.
+        .convert('description', CleanDescriptionPrefixes)
+
+        # Convertd date/time to a single field.
+        .addfield('datetime', partial(ParseDateTimePair, 'date', 'time'), index=0)
+        .cutout('date', 'time')
+
+        # Convert numbers to Decimal instances.
+        .convert(('commissions_fees', 'amount', 'balance'), ToDecimal)
+
+        # Back out the "Misc Fees" field that is missing using consecutive
+        # balances.
+        .addfieldusingcontext('misc_fees', ComputeMiscFees)
+
+        # Parse to synthesize the symbol for later, if present.
+        .addfield('do', ParseDescription)
+        .addfield('symbol', lambda r: r.do.get('symbol', ''))
+        .addfield('strategy', lambda r: r.do.get('strategy', ''))
+        .addfield('quantity', lambda r: r.do.get('quantity', ''))
+        .cutout('do')
     )
 
     return table
 
 
-def ProcessCashBalance(table, filename, config):
-    # Note: We do not use this anymore, we use the ameritrade2beancount script instead.
-    return
+def ComputeMiscFees(prev: Record, rec: Record, _: Record) -> Decimal:
+    """Compute the Misc Fees backed from balance difference."""
+    if rec is None or prev is None:
+        return ZERO
+    diff_balance = rec.balance - prev.balance
+    return diff_balance - ((rec.amount or ZERO) + (rec.commissions_fees or ZERO))
 
 
-def ProcessFuturesStatements(table, filename, config):
+#-------------------------------------------------------------------------------
+# Futures Statements
+
+def FuturesStatements_Prepare(table: Table) -> Table:
     table = (
-        PrepareTable(table, 'exec_date', 'exec_time')
+        table
+
+        # Remove bottom totals line.
+        .select('description', lambda v: v != 'TOTAL')
+        # Clean up uselesss prefixed from the descriptions.
+        .convert('description', CleanDescriptionPrefixes)
+
+        # Convertd date/time to a single field.
+        .addfield('datetime',
+                  partial(ParseDateTimePair, 'exec_date', 'exec_time'), index=0)
+        .cutout('exec_date', 'exec_time')
         .convert('trade_date',
-                 lambda v: datetime.datetime.strptime(v, '%m/%d/%y').date()))
+                 lambda v: datetime.datetime.strptime(v, '%m/%d/%y').date())
 
-    new_entries = []
-    #print(table.lookallstr())
-
-    balances = collections.defaultdict(Inventory)
-    for index, row in enumerate(table.records()):
-        handler = _TRANSACTION_HANDLERS[row.type]
-        entries = handler(row, filename, index, config, balances)
-        if entries:
-            insert = (new_entries.extend
-                      if isinstance(entries, list)
-                      else new_entries.append)
-            insert(entries)
-
-    return new_entries
+        # .select('description',
+        #         lambda v: not re.match(r'Cash balance at the start of business day', v))
 
 
-def ProcessForexStatements(table, filename, config):
-    new_entries = []
-    return new_entries
+        # Remove dashes from empty fields (making them truly empty).
+        .convert(('ref', 'misc_fees', 'commissions_fees', 'amount'), RemoveDashEmpty)
+
+        # Convert numbers to Decimal instances.
+        .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), ToDecimal)
+    )
+
+    return table
+
+
+#-------------------------------------------------------------------------------
+# Forex Statements
+
+def ForexStatements_Prepare(table: Table) -> Table:
+    return []
+
+
+#-------------------------------------------------------------------------------
+# Account Order History
+#-------------------------------------------------------------------------------
+# Account Trade History
+
+def AccountTradeHistory_Prepare(table: Table) -> Table:
+    """Prepare the account trade history table."""
+
+    table = (
+        table
+
+        # Remove empty columns.
+        .cutout('col0')
+
+        # Convert date/time fields to objects.
+        .convert('exec_time', lambda string: datetime.datetime.strptime(
+            string, '%m/%d/%y %H:%M:%S'))
+
+        # Fill in missing values.
+        .filldown('exec_time')
+        .convert(('spread', 'order_type', 'order_id'), lambda v: v or None)
+        .filldown('spread', 'order_type', 'order_id')
+
+        # Convert numbers to Decimal instances.
+        .convert(('qty', 'price', 'strike'), ToDecimal)
+
+        # Convert pos effect to single word naming.
+        .convert('pos_effect', lambda r: 'OPENING' if 'TO OPEN' else 'CLOSING')
+
+        # Convert order ids to integers (because they area).
+        .convert('order_id', int)
+    )
+
+    return table
+
+
+#-------------------------------------------------------------------------------
+# Equities
+#-------------------------------------------------------------------------------
+# Options
+#-------------------------------------------------------------------------------
+# Futures
+#-------------------------------------------------------------------------------
+# Futures Options
+#-------------------------------------------------------------------------------
+# Profits and Losses
+#-------------------------------------------------------------------------------
+# Forex Account Summary
+#-------------------------------------------------------------------------------
+# Account Summary
+
+
+
+
+
+# def FuturesStatements(table, filename, config):
+#     table = (
+#         _PrepareFuturesStatements(table, 'exec_date', 'exec_time')
+#         .convert('trade_date',
+#                  lambda v: datetime.datetime.strptime(v, '%m/%d/%y').date()))
+#
+#     new_entries = []
+#     balances = collections.defaultdict(Inventory)
+#     for index, row in enumerate(table.records()):
+#         handler = _TRANSACTION_HANDLERS[row.type]
+#         entries = handler(row, filename, index, config, balances)
+#         if entries:
+#             insert = (new_entries.extend
+#                       if isinstance(entries, list)
+#                       else new_entries.append)
+#             insert(entries)
+#
+#     return new_entries
+
 
 
 def OnBalance(row: Record, filename: str, index: int, config: Config, balances: Inventory) -> data.Entries:
