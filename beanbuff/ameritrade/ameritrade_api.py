@@ -970,8 +970,6 @@ def main():
         entries.extend(GetExpiredOptionsPrices(positions, balances))
 
 
-
-
     # Add a final balance entry.
     balance_entry = CreateBalance(api, accountId)
     if balance_entry:

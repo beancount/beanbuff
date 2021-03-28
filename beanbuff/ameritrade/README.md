@@ -114,7 +114,8 @@ A number of identifiers are present:
 ## Non-Trade Data
 
 Non-trading data includes cash transfers, misc. regulatory fees, sweeps,
-corrections and other non-trading events. These are imported from
+corrections, third-party transfers, start of business day balances and other
+non-trading events. These are imported from
 
 - The "Cash Balances" tables for equities and equity options.
 - The "Futures Statements" for the futures account.
