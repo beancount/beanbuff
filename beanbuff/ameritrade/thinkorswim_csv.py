@@ -15,14 +15,16 @@ import datetime
 import collections
 import typing
 import logging
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from decimal import Decimal
 from functools import partial
 
 from dateutil import parser
 import petl
 petl.config.look_style = 'minimal'
+petl.config.failonerror = True
 
+from beancount.core.number import ZERO
 from beancount.core.amount import Amount
 from beancount.core.inventory import Inventory
 from beancount.core import data
@@ -39,6 +41,9 @@ from beangulp import testing
 from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
+
+from beanbuff.data.rowtxns import Txn, TxnType, Instruction, Effect
+from beanbuff.data.futures import MULTIPLIERS
 
 
 OPTION_CONTRACT_SIZE = 100
@@ -111,8 +116,23 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
                       .sort('datetime'))
 
         # Match up the equities and futures statements entries to the trade
-        # history and ensure a perfect match.
-        trades = ProcessTradeHistory(equities_trade, futures_trade, tradehist)
+        # history and ensure a perfect match, returning groups of (date-time,
+        # cash-rows, trade-rows), properly matched.
+        equities_groups, futures_groups = ProcessTradeHistory(equities_trade, futures_trade, tradehist)
+
+        if 0:
+            # Debug print.
+            for group in futures_groups:
+                PrintGroup(group)
+
+        # Convert matched groups of rows to trnasctions.
+        futures_txns = ConvertGroupsToTransactions(futures_groups)
+
+        if 1:
+            table = (petl.wrap(itertools.chain([futures_txns[0]._fields], futures_txns))
+                     .addfield('size', lambda r: r.multiplier * r.price * r.quantity)
+                     .select('size', lambda v: v > 10000))
+            print(table.lookallstr())
 
         # new_entries = []
         # if entries:
@@ -176,9 +196,45 @@ def ProcessNonTradeFutures(cash_nontrade: Table) -> data.Entries:
     return []
 
 
+def ReconcilePairsOrderIds(table: Table, threshold: int) -> Table:
+    """On a pairs trade, the time issued will be identical, but we will find two
+    distinct symbols and order ids (one that is 1 or 2 integer apart). We reduce
+    the ids to the smallest one by looking at increments below some threshold
+    and squashing the later ones. This way we can link together pairs trades or
+    blast-alls (probably).
+    """
+    def AdjustedOrder(head_id, rec: Record) -> int:
+        if head_id[0] is None:
+            head_id[0] = rec.order_id
+            return rec.order_id
+        diff = rec.order_id - head_id[0]
+        if diff == 0:
+            return rec.order_id
+        if diff < threshold:
+            return head_id[0]
+        head_id[0] = rec.order_id
+        return rec.order_id
+    table = (
+        table
+        .sort('order_id')
+        .addfield('adj_order_id', partial(AdjustedOrder, [None]))
+        .addfield('order_diff',
+                  lambda r: ((r.order_id - r.adj_order_id)
+                             if (r.order_id != r.adj_order_id)
+                             else '')))
+
+    if 0:
+        # Debug print.
+        for order_id, group in table.aggregate('adj_order_id', list).records():
+            if len(set(rec.order_id for rec in group)) > 1:
+                print(petl.wrap(itertools.chain([table.header()], group)).lookallstr())
+
+    return table
+
+
 def ProcessTradeHistory(equities_cash: Table,
                         futures_cash: Table,
-                        trade_hist: Table) -> List[Any]:
+                        trade_hist: Table) -> Tuple[List[Any], List[Any]]:
     """Join the trade history table with the equities table.
 
     Note that the equities table does not contian the ref ids, so they we have
@@ -187,71 +243,167 @@ def ProcessTradeHistory(equities_cash: Table,
     just use that, that would resolve the problem. There is a bug in the
     software, it doesn't get exported.)
     """
-    trades = []
+
+    trade_hist = ReconcilePairsOrderIds(trade_hist, 5)
 
     # We want to pair up the trades from the equities and futures statements
     # with the trades from the trade history table. We will aggregate the trade
     # history table by a unique key (using the time, seems to be pretty good)
     # and decimate it by matching rows from the cash tables. Then we verify that
-    # the trade history is fully accounted for.
-    thmap = trade_hist.recordlookup('exec_time')
+    # the trade history has been fully accounted for by checking that it's empty.
+    trade_hist_map = trade_hist.recordlookup('exec_time')
 
     # Process the equities cash table.
-    def MatchTradingRows(mapping):
+    def MatchTradingRows(cash_table: Table):
+        order_groups = []
+        mapping = cash_table.recordlookup('datetime')
         for dtime, cash_rows in mapping.items():
-            # print()
-            # print(dtime)
-            # for crow in cash_rows:
-            #     print("C", crow)
+            # If the transaction is not a trade, ignore it.
+            # Dividends, expirations and others will have to be processed elsewhere.
             if not any(crow.type == 'TRD' for crow in cash_rows):
                 # Process dividends and expirations.
                 continue
 
+            # Pull up the rows corresponding to this cash statement and remove
+            # them from the trade history.
             try:
-                trade_rows = thmap.pop(dtime)
+                trade_rows = trade_hist_map.pop(dtime)
             except KeyError:
                 raise KeyError("Trade history for cash row '{}' not found".format(crow))
-            else:
-                pass
-                # for trow in trade_rows:
-                #     print("T", trow)
 
-            # Note: For now we live with the 'exec_time' as the unique id,
-            # knowing that of the matches may contain more than a single
-            # transaction to be produced in the trade log.
+            order_groups.append((dtime, cash_rows, trade_rows))
+
+            # Debug print the matched rows.
             if 0:
-                # An interesting case may occur here: On a pairs trade, the time
-                # issued will be identical, but we will find two distinct symbols
-                # and order ids (one consecutive to the other). We reduce the ids to
-                # a single one by looking at increments.
-                #
-                # Reduce the order ids by ignoring consecutive order ids. If there
-                # is a single resultant id, it was a linked trade (and they all
-                # belong together).
-                order_ids = []
-                last_oid = 0
-                for oid in sorted(set(trow.order_id for trow in trade_rows)):
-                    if (oid - last_oid) > 2:
-                        order_ids.append(oid)
-                    last_oid = oid
+                for crow in cash_rows:
+                    print("C", crow)
+                for trow in trade_rows:
+                    print("T", trow)
+                print()
+        return order_groups
 
-                if len(order_ids) != 1:
-                    message = ("Conflict: More than a single order matched a "
-                               "cash line: {}".format(order_ids))
-                    logging.error(message)
-                    raise ValueError(message)
-
-    eqmap = equities_cash.recordlookup('datetime')
-    MatchTradingRows(eqmap)
-    fumap = futures_cash.recordlookup('datetime')
-    MatchTradingRows(fumap)
+    # Fetch the trade history rows for equities.
+    equities_groups = MatchTradingRows(equities_cash)
+    # Fetch the trade history rows for futures.
+    futures_groups = MatchTradingRows(futures_cash)
 
     # Assert that the trade history table has been fully accounted for.
-    if thmap:
+    if trade_hist_map:
         raise ValueError("Some trades from the trade history not covered by cash: "
-                         "{}".format(thmap))
+                         "{}".format(trade_hist_map))
 
-    return trades
+    return equities_groups, futures_groups
+
+
+Group = Tuple[datetime.date, List[Record], List[Record]]
+
+
+def PrintGroup(group: Group):
+    dtime, cash_rows, trade_rows = group
+    print("-" * 200)
+    print(dtime)
+    ctable = petl.wrap(itertools.chain([cash_rows[0].flds], cash_rows))
+    print(ctable.lookallstr())
+    ttable = petl.wrap(itertools.chain([trade_rows[0].flds], trade_rows))
+    print(ttable.lookallstr())
+
+    # for crow in cash_rows:
+    #     print("C", crow)
+    # for trow in trade_rows:
+    #     print("T", trow)
+    # print()
+
+
+def FindMultiplier(string: str) -> Decimal:
+    """Find a multiplier spec in the given description string."""
+    match = re.search(r"\b1/(\d+)\b", string)
+    if not match:
+        match = re.fullmatch("(/.*)[FGHJKMNQUVXZ]2[0-9]", string)
+        if not match:
+            raise ValueError("No symbol to find multiplier: '{}'".format(string))
+        symbol = match.group(1)
+        try:
+            multiplier = MULTIPLIERS[symbol]
+        except KeyError:
+            raise ValueError("No multiplier for symbol: '{}'".format(symbol))
+        return Decimal(multiplier)
+    return Decimal(match.group(1))
+
+
+def ConvertGroupsToTransactions(groups: List[Group],
+                                quote_currency: str = 'USD') -> data.Entries:
+    """Convert groups of cash and trade rows to Beancount transactions."""
+
+    transactions = []
+    for group in groups:
+        dtime, cash_rows, trade_rows = group
+        PrintGroup(group)
+
+        # Attempt to match up each cash row to each trade rows. We assert that
+        # we always find only two situations: N:N matches, where we can pair up
+        # the transactions, and 1:n matches (for options strategies) where the
+        # fees will be inserted on one of the resulting transactions.
+        subgroups = []
+        if len(cash_rows) == 1:
+            subgroups.append((cash_rows[0], trade_rows))
+
+        elif len(cash_rows) == len(trade_rows):
+            # If we have an N:N situation, pair up the two groups by using quantity.
+            cash_rows_copy = list(cash_rows)
+            for trow in trade_rows:
+                for index, crow in enumerate(cash_rows_copy):
+                    if crow.quantity == trow.quantity:
+                        break
+                else:
+                    raise ValueError("Could not find cash row matching the quantity of a trade row")
+                crow = cash_rows_copy.pop(index)
+                subgroups.append((crow, [trow]))
+            if cash_rows_copy:
+                raise ValueError("Internal error: residual row after matching.")
+
+        else:
+            raise ValueError("Impossible to match up cash and trade rows.")
+
+        # Process each of the subgroups.
+        for crow, trade_rows in subgroups:
+            if 1:
+                # Debug print.
+                print('C', crow)
+                for trow in trade_rows:
+                    print('T', trow)
+
+            # Fetch the multiplier from the description.
+            multiplier = FindMultiplier(trow.orig_symbol)
+
+            # Pick up all the fees from the cash transactions.
+            commissions = crow.commissions_fees
+            fees = crow.misc_fees
+            for trow in trade_rows:
+                txn = Txn(trow.exec_time,
+                          None,
+                          trow.adj_order_id,
+                          None,
+                          None,
+                          'TRADE',
+                          trow.side,
+                          trow.pos_effect,
+                          trow.symbol,
+                          quote_currency,
+                          trow.quantity,
+                          multiplier,
+                          trow.price,
+                          commissions,
+                          fees,
+                          crow.description,
+                          None)
+                transactions.append(txn)
+
+                # Reset the commnissions so that they are only included on the
+                # first leg where relevant.
+                commissions = ZERO
+                fees = ZERO
+
+    return transactions
 
 
 #-------------------------------------------------------------------------------
@@ -340,8 +492,9 @@ def FuturesStatements_Prepare(table: Table) -> Table:
         # Remove dashes from empty fields (making them truly empty).
         .convert(('ref', 'misc_fees', 'commissions_fees', 'amount'), RemoveDashEmpty)
 
-        # Convert numbers to Decimal instances.
+        # Convert numbers to Decimal or integer instances.
         .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), ToDecimal)
+        .convert('ref', lambda v: int(v) if v else 0)
     )
     return ParseDescription(table)
 
@@ -361,7 +514,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
 
         # Convert date/time fields to objects.
         .convert('exec_time', lambda string: datetime.datetime.strptime(
-            string, '%m/%d/%y %H:%M:%S'))
+            string, '%m/%d/%y %H:%M:%S') if string else None)
 
         # Fill in missing values.
         .filldown('exec_time')
@@ -369,13 +522,13 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .filldown('spread', 'order_type', 'order_id')
 
         # Convert numbers to Decimal instances.
-        .convert(('qty', 'price', 'strike'), ToDecimal)
+        .convert(('qty', 'price', 'strike'), ToDecimal, pass_row=True)
 
         # Convert pos effect to single word naming.
         .convert('pos_effect', lambda r: 'OPENING' if 'TO OPEN' else 'CLOSING')
 
         # Convert order ids to integers (because they area).
-        .convert('order_id', int)
+        .convert('order_id', lambda v: int(v) if v else 0)
 
         # Normalize and fixup the symbols to remove the multiplier and month
         # string. '/CLK21 1/1000 MAY 21' is redundant.
@@ -400,8 +553,22 @@ def RemoveDashEmpty(value: str) -> str:
     return value if value != '--' else ''
 
 
-def ToDecimal(value: str) -> Union[Decimal, str]:
-    return Decimal(value.replace(',', '')) if value else ''
+def ToDecimal(value: str, row=None) -> Union[Decimal, str]:
+    # Decimalize bond prices.
+    if re.search(r"''", value):
+        if row is None:
+            raise ValueError("Contract type is needed to determine fraction.")
+        match = re.match(r"(\d+)''(\d+)", value)
+        if not match:
+            raise ValueError("Invalid bond price: {}".format(value))
+        # For Treasuries, options quote in 64th's while outrights in 32nd's.
+        divisor = 64 if row.exp else 32
+        dec = Decimal(match.group(1)) + Decimal(match.group(2))/divisor
+        #print(value, "->", dec, row.exp)
+        return dec
+    else:
+        # Regular prices.
+        return Decimal(value.replace(',', '')) if value else ''
 
 
 #-------------------------------------------------------------------------------
@@ -709,7 +876,7 @@ def _ParseDividendDescription(description: str) -> Dict[str, Any]:
 
 
 def CleanDescriptionPrefixes(string: str) -> str:
-    return re.sub('(WEB:AA_[A-Z]+|tAndroid) ', '', string)
+    return re.sub('(WEB:(AA_[A-Z]+|WEB_GRID_SNAP)|tAndroid) ', '', string)
 
 
 

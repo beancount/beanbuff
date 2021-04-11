@@ -30,6 +30,7 @@ The output will include:
 
 import argparse
 from decimal import Decimal
+import itertools
 import logging
 import re
 from typing import List, Tuple, Optional
@@ -114,6 +115,20 @@ def ConsolidatePositionStatement(
     groups = SplitGroups(table)
     tables = []
     for name, subname, gtable in groups:
+        counter = iter(itertools.count())
+        def OnPosition(x):
+            for row in x:
+                print("XXX", row)
+            print()
+        xtable = (gtable
+                  .addfield('PosNo',
+                            lambda r: next(counter) if bool(r['BP Effect']) else None)
+                  .filldown('PosNo')
+                  .aggregate('PosNo', OnPosition))
+        if debug_tables:
+            print(xtable.lookallstr())
+
+
         ftable = (gtable
                   # Remove redundant detail.
                   .select(lambda r: bool(r['BP Effect']))
@@ -131,6 +146,11 @@ def ConsolidatePositionStatement(
             print(ftable.lookallstr())
             print(ftable.aggregate(key=None, aggregation=sums))
             print()
+
+    if debug_tables:
+        raise SystemExit
+
+
 
     # Consolidate the table.
     atable = petl.cat(*tables)
@@ -153,7 +173,6 @@ def Report(atable: Table, totals: Table,
     """Print all the desired aggregations and filters."""
 
     print("# Position Statement\n")
-
     fields = list(FIELDS)
     if 'Notional' in atable.header():
         fields.append('Notional')
@@ -198,7 +217,9 @@ def Report(atable: Table, totals: Table,
 @click.argument('positions_csv')
 @click.option('--reference', '-r', type=Decimal, default=None,
               help="Price of the beta-weighted reference applied to the downloaded file.")
-def main(positions_csv, reference):
+@click.option('--notional', '-x', is_flag=True,
+              help="Estimate notional exposure for each position.")
+def main(positions_csv: str, reference: Decimal, notional: bool):
     # If the reference isn't given, attempt to get tit from
     if reference is None:
         try:
@@ -213,14 +234,23 @@ def main(positions_csv, reference):
     # Read positions statement and consolidate it.
     table = petl.fromcsv(positions_csv)
     #print(table.lookallstr())
-    atable, totals = ConsolidatePositionStatement(table, reference)
-    Report(atable, totals, 10)
+    atable, totals = ConsolidatePositionStatement(table, reference, debug_tables=notional)
+
+    if not notional:
+        Report(atable, totals, 10)
+    else:
+        print(atable.header())
+        raise NotImplementedError("Missing parsing for positions.")
+        # for row in atable.records():
+        #     print(row)
 
     # TODO(blais): Compute beta-weighted adjusted values yourself.
     # TODO(blais): Add % BP per trade, should be 3-5%.
     # TODO(blais): Render total % BP used and available, should be 35%.
     # TODO(blais): Compute notional equivalent exposure.
     # TODO(blais): Add correlation matrix between the major asset classes (oil, bonds, stocks, etc.).
+    # TODO: Create a metric of delta, strategy and duration diversification.
+    # TODO: Create a distribution of BPR size over Net Liq, should be 1-2%
 
 
 if __name__ == '__main__':

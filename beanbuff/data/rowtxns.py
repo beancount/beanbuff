@@ -17,6 +17,11 @@ accounts.
 __copyright__ = "Copyright (C) 2021  Martin Blais"
 __license__ = "GNU GPLv2"
 
+from decimal import Decimal
+import datetime
+from enum import Enum
+from typing import Any, NamedTuple, Optional
+
 
 class TxnType(Enum):
     """The tranasction type."""
@@ -38,11 +43,11 @@ class Effect(Enum):
 
 
 class Txn(NamedTuple):
-    """A traidng transaction object."""
+    """A trading transaction object."""
 
     # The date and time at which the transaction occurred. This is distinct from
     # the settlement date (which is not provided by this data structure).
-    date: datetime.datetime
+    timestamp: datetime.datetime
 
     # A unique transaction id by which we can identify this transaction. This is
     # essential in order to deduplicate previously imported transactions and is
@@ -92,7 +97,7 @@ class Txn(NamedTuple):
     symbol: str
 
     # The currency that the instrument is quoted in.
-    currency: data.Currency
+    currency: str
 
     # The quantity bought or sold. This number should always be positive. The
     # 'instruction' field will provide the sign.
@@ -107,7 +112,6 @@ class Txn(NamedTuple):
     # here.)
     multiplier: Optional[Decimal]
 
-
     # The price, in the quote currency, at which the instrument transacted.
     price: Decimal
 
@@ -117,6 +121,11 @@ class Txn(NamedTuple):
 
     # The total amount paid for exchange and other regulatory institution fees.
     fees: Decimal
+
+    # A textual description to attach to the transaction, if one is available.
+    # This can be used to convert to Beancount transactions to provide
+    # meaningful narration.
+    description: Optional[str]
 
     # Any object you want to attach to this transaction. This can be the
     # original transaction object in the source data, or None. Normally this
