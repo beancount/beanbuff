@@ -18,6 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 from decimal import Decimal
 from functools import partial
+from itertools import chain
 
 from dateutil import parser
 import petl
@@ -25,6 +26,7 @@ petl.config.look_style = 'minimal'
 petl.config.failonerror = True
 
 from beancount.core.number import ZERO
+from beancount.core.number import ONE
 from beancount.core.amount import Amount
 from beancount.core.inventory import Inventory
 from beancount.core import data
@@ -46,7 +48,7 @@ from beanbuff.data.rowtxns import Txn, TxnType, Instruction, Effect
 from beanbuff.data.futures import MULTIPLIERS
 
 
-OPTION_CONTRACT_SIZE = 100
+OPTION_CONTRACT_SIZE = Decimal(100)
 Table = petl.Table
 Record = petl.Record
 debug = False
@@ -126,12 +128,20 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
                 PrintGroup(group)
 
         # Convert matched groups of rows to trnasctions.
-        futures_txns = ConvertGroupsToTransactions(futures_groups)
+        equities_txns = ConvertGroupsToTransactions(equities_groups, False)
+        futures_txns = ConvertGroupsToTransactions(futures_groups, True)
+
+        # TODO(blais): Add type (FUTURES, ETF, CALL, PUT, etc.)
+        # TODO(blais): Add finalized option symbol.
 
         if 1:
-            table = (petl.wrap(itertools.chain([futures_txns[0]._fields], futures_txns))
-                     .addfield('size', lambda r: r.multiplier * r.price * r.quantity)
-                     .select('size', lambda v: v > 10000))
+            # Debug print.
+            txns = petl.cat(
+                petl.wrap(chain([Txn._fields], equities_txns)),
+                petl.wrap(chain([Txn._fields], futures_txns)))
+            table = (petl.wrap(txns)
+                     .addfield('size', lambda r: r.multiplier * r.price * r.quantity))
+                     #.select('size', lambda v: v > 10000))
             print(table.lookallstr())
 
         # new_entries = []
@@ -227,7 +237,7 @@ def ReconcilePairsOrderIds(table: Table, threshold: int) -> Table:
         # Debug print.
         for order_id, group in table.aggregate('adj_order_id', list).records():
             if len(set(rec.order_id for rec in group)) > 1:
-                print(petl.wrap(itertools.chain([table.header()], group)).lookallstr())
+                print(petl.wrap(chain([table.header()], group)).lookallstr())
 
     return table
 
@@ -273,13 +283,6 @@ def ProcessTradeHistory(equities_cash: Table,
 
             order_groups.append((dtime, cash_rows, trade_rows))
 
-            # Debug print the matched rows.
-            if 0:
-                for crow in cash_rows:
-                    print("C", crow)
-                for trow in trade_rows:
-                    print("T", trow)
-                print()
         return order_groups
 
     # Fetch the trade history rows for equities.
@@ -302,23 +305,17 @@ def PrintGroup(group: Group):
     dtime, cash_rows, trade_rows = group
     print("-" * 200)
     print(dtime)
-    ctable = petl.wrap(itertools.chain([cash_rows[0].flds], cash_rows))
+    ctable = petl.wrap(chain([cash_rows[0].flds], cash_rows))
     print(ctable.lookallstr())
-    ttable = petl.wrap(itertools.chain([trade_rows[0].flds], trade_rows))
+    ttable = petl.wrap(chain([trade_rows[0].flds], trade_rows))
     print(ttable.lookallstr())
-
-    # for crow in cash_rows:
-    #     print("C", crow)
-    # for trow in trade_rows:
-    #     print("T", trow)
-    # print()
 
 
 def FindMultiplier(string: str) -> Decimal:
     """Find a multiplier spec in the given description string."""
     match = re.search(r"\b1/(\d+)\b", string)
     if not match:
-        match = re.fullmatch("(/.*)[FGHJKMNQUVXZ]2[0-9]", string)
+        match = re.search(r"(?:\s|^)(/[A-Z0-9]*?)[FGHJKMNQUVXZ]2[0-9]\b", string)
         if not match:
             raise ValueError("No symbol to find multiplier: '{}'".format(string))
         symbol = match.group(1)
@@ -331,13 +328,15 @@ def FindMultiplier(string: str) -> Decimal:
 
 
 def ConvertGroupsToTransactions(groups: List[Group],
-                                quote_currency: str = 'USD') -> data.Entries:
+                                is_futures: bool,
+                                quote_currency: str = 'USD') -> List[Txn]:
     """Convert groups of cash and trade rows to Beancount transactions."""
 
     transactions = []
     for group in groups:
         dtime, cash_rows, trade_rows = group
-        PrintGroup(group)
+        if 0:
+            PrintGroup(group)
 
         # Attempt to match up each cash row to each trade rows. We assert that
         # we always find only two situations: N:N matches, where we can pair up
@@ -345,7 +344,7 @@ def ConvertGroupsToTransactions(groups: List[Group],
         # fees will be inserted on one of the resulting transactions.
         subgroups = []
         if len(cash_rows) == 1:
-            subgroups.append((cash_rows[0], trade_rows))
+            subgroups.append((cash_rows, trade_rows))
 
         elif len(cash_rows) == len(trade_rows):
             # If we have an N:N situation, pair up the two groups by using quantity.
@@ -357,27 +356,40 @@ def ConvertGroupsToTransactions(groups: List[Group],
                 else:
                     raise ValueError("Could not find cash row matching the quantity of a trade row")
                 crow = cash_rows_copy.pop(index)
-                subgroups.append((crow, [trow]))
+                subgroups.append(([crow], [trow]))
             if cash_rows_copy:
                 raise ValueError("Internal error: residual row after matching.")
 
         else:
-            raise ValueError("Impossible to match up cash and trade rows.")
+            message = "Impossible to match up cash and trade rows."
+            if is_futures:
+                raise ValueError(message)
+            else:
+                logging.warning(message)
+                subgroups.append((cash_rows, trade_rows))
 
         # Process each of the subgroups.
-        for crow, trade_rows in subgroups:
-            if 1:
+        for cash_rows, trade_rows in subgroups:
+            if 0:
                 # Debug print.
-                print('C', crow)
+                for crow in cash_rows:
+                    print('C', crow)
                 for trow in trade_rows:
                     print('T', trow)
+                print()
 
             # Fetch the multiplier from the description.
-            multiplier = FindMultiplier(trow.orig_symbol)
+            description = cash_rows[0].description
+            if trade_rows[0].type == 'FUTURE':
+                multiplier = FindMultiplier(description)
+            elif trade_rows[0].type in {'CALL', 'PUT'}:
+                multiplier = OPTION_CONTRACT_SIZE
+            else:
+                multiplier = ONE
 
             # Pick up all the fees from the cash transactions.
-            commissions = crow.commissions_fees
-            fees = crow.misc_fees
+            commissions = sum(crow.commissions_fees for crow in cash_rows)
+            fees = sum(crow.misc_fees for crow in cash_rows)
             for trow in trade_rows:
                 txn = Txn(trow.exec_time,
                           None,
@@ -394,9 +406,10 @@ def ConvertGroupsToTransactions(groups: List[Group],
                           trow.price,
                           commissions,
                           fees,
-                          crow.description,
+                          description,
                           None)
                 transactions.append(txn)
+                #print(trow)
 
                 # Reset the commnissions so that they are only included on the
                 # first leg where relevant.
@@ -562,13 +575,13 @@ def ToDecimal(value: str, row=None) -> Union[Decimal, str]:
         if not match:
             raise ValueError("Invalid bond price: {}".format(value))
         # For Treasuries, options quote in 64th's while outrights in 32nd's.
-        divisor = 64 if row.exp else 32
+        divisor = 32 if row.type == 'FUTURE' else 64
         dec = Decimal(match.group(1)) + Decimal(match.group(2))/divisor
-        #print(value, "->", dec, row.exp)
+        #print(value, "->", dec, row.type)
         return dec
     else:
         # Regular prices.
-        return Decimal(value.replace(',', '')) if value else ''
+        return Decimal(value.replace(',', '')) if value else ZERO
 
 
 #-------------------------------------------------------------------------------
