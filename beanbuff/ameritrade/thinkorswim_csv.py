@@ -7,7 +7,14 @@ Instructions:
 - Select the desired time period
 - Right on the rightmost hamburger menu and select "Export to File..."
 
+This module implements a pretty tight reconciliation from the AccountStatement
+export to CSV, joining and verifying the equities cash and futures cash
+statements with the trade history.
+
+Caveats:
+- Transaction IDs are missing can have to be joined in later from the API.
 """
+
 import csv
 import re
 import itertools
@@ -46,6 +53,7 @@ from beangulp.importers.mixins import identifier
 
 from beanbuff.data.rowtxns import Txn, TxnType, Instruction, Effect
 from beanbuff.data.futures import MULTIPLIERS
+from beanbuff.data import beantxns
 
 
 OPTION_CONTRACT_SIZE = Decimal(100)
@@ -72,6 +80,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
         'asset_money_market'  : 'Money market account associated with this account',
         'asset_forex'         : 'Retail foreign exchange trading account',
         'futures_contracts'   : 'Root account holding contracts',
+        'futures_options'     : 'Subaccount containing options',
         'futures_margin'      : 'Margin used, in dollars',
         'futures_cash'        : 'Cash account for futures only',
         'futures_pnl'         : 'Profit/loss on futures contracts',
@@ -144,11 +153,18 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
                      #.select('size', lambda v: v > 10000))
             print(table.lookallstr())
 
-        # new_entries = []
-        # if entries:
-        #     new_entries.extend(entries)
-        # return new_entries
-        return []
+        bconfig = beantxns.Config(
+            self.config['currency'],
+            self.config['futures_cash'],
+            self.config['futures_contracts'],
+            self.config['futures_options'],
+            self.config['futures_commissions'],
+            self.config['futures_miscfees'],
+            self.config['pnl'],
+            'td-{}',
+            'order-{}')
+        futures_entries = beantxns.CreateTransactions(futures_txns, bconfig)
+        return futures_entries
 
 
 def SplitCashBalance(statement: Table, tradehist: Table) -> Tuple[Table, Table]:
@@ -365,7 +381,7 @@ def ConvertGroupsToTransactions(groups: List[Group],
             if is_futures:
                 raise ValueError(message)
             else:
-                logging.warning(message)
+                #logging.warning(message)
                 subgroups.append((cash_rows, trade_rows))
 
         # Process each of the subgroups.
@@ -390,7 +406,10 @@ def ConvertGroupsToTransactions(groups: List[Group],
             # Pick up all the fees from the cash transactions.
             commissions = sum(crow.commissions_fees for crow in cash_rows)
             fees = sum(crow.misc_fees for crow in cash_rows)
-            for trow in trade_rows:
+            for index, trow in enumerate(trade_rows, start=1):
+                row_desc = ("{}  [{}/{}]".format(description, index, len(trade_rows))
+                            if len(trade_rows) > 1
+                            else description)
                 txn = Txn(trow.exec_time,
                           None,
                           trow.adj_order_id,
@@ -406,7 +425,7 @@ def ConvertGroupsToTransactions(groups: List[Group],
                           trow.price,
                           commissions,
                           fees,
-                          description,
+                          row_desc,
                           None)
                 transactions.append(txn)
                 #print(trow)
@@ -890,7 +909,6 @@ def _ParseDividendDescription(description: str) -> Dict[str, Any]:
 
 def CleanDescriptionPrefixes(string: str) -> str:
     return re.sub('(WEB:(AA_[A-Z]+|WEB_GRID_SNAP)|tAndroid) ', '', string)
-
 
 
 if __name__ == '__main__':
