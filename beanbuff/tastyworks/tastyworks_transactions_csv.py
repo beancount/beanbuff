@@ -36,11 +36,9 @@ from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
-from beanbuff.data import futures
-from beanbuff.data import beansym
+from beanbuff.tastyworks import tastysyms
 
 
-OPTION_CONTRACT_SIZE = 100
 Table = petl.Table
 Record = petl.Record
 debug = False
@@ -71,7 +69,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
     def extract(self, file):
         table = petl.fromcsv(file.name)
         ptable = PrepareTable(table)
-        if 0:
+        if 1:
             print()
             print()
             print(ptable.lookallstr())
@@ -207,84 +205,6 @@ def DoTrade(row: Record, meta: dict, config: Config):
     return [txn]
 
 
-def ParseEquityOptionSymbol(symbol: str) -> str:
-    # e.g. 'TLRY  210416C00075000' for equity option;
-    return beansym.Instrument(
-        underlying=symbol[0:6].rstrip(),
-        expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
-        side=symbol[12],
-        strike=Decimal(symbol[13:21]) / _PRICE_DIVISOR,
-        multiplier=OPTION_CONTRACT_SIZE)
-
-
-FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
-
-
-def ParseFuturesSymbol(symbol: str) -> str:
-    match = re.match(f"/{FUTSYM}", symbol)
-    assert match
-    underlying, fmonth, fyear = match.groups()
-    underlying = f"/{underlying}"
-    decade = datetime.date.today().year % 100 // 10
-    multiplier = futures.MULTIPLIERS.get(underlying, 1)
-    return beansym.Instrument(
-        underlying=underlying,
-        calendar=f"{fmonth}{decade}{fyear}",
-        multiplier=multiplier)
-
-
-def ParseFuturesOptionSymbol(symbol: str) -> str:
-    # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
-    match = re.match(fr"\./{FUTSYM} +{FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
-
-    underlying, fmonth, fyear = match.group(1,2,3)
-    decade = datetime.date.today().year % 100 // 10
-    calendar = f"{fmonth}{decade}{fyear}"
-
-    optcontract, optfmonth, optfyear = match.group(4,5,6)
-    optdecade = datetime.date.today().year % 100 // 10
-    optcalendar = f"{optfmonth}{optdecade}{optfyear}"
-
-    expistr = match.group(7)
-    expiration = datetime.date(int(expistr[0:2]), int(expistr[2:4]), int(expistr[4:6]))
-    side = match.group(8)
-    strike = Decimal(match.group(9))
-
-    return beansym.Instrument(
-        underlying=f"/{underlying}",
-        calendar=calendar,
-        optcontract=optcontract,
-        optcalendar=optcalendar,
-        expiration=expiration,
-        side=side,
-        strike=strike,
-        multiplier=1)  ## TODO(blais):
-
-
-_PRICE_DIVISOR = Decimal('1000')
-
-
-def ParseSymbol(symbol: str, itype: Optional[str]) -> options.Option:
-    if not symbol:
-        return None
-    # Futures options always start with a period.
-    inst = None
-    if itype == 'Future Option' or itype is None and symbol.startswith("./"):
-        inst = ParseFuturesOptionSymbol(symbol)
-    # Futures always start with a slash.
-    elif itype == 'Future' or itype is None and symbol.startswith("/"):
-        inst = ParseFuturesSymbol(symbol)
-    # Then we have options, with a space.
-    elif itype == 'Equity Option' or itype is None and ' ' in symbol:
-        inst = ParseEquityOptionSymbol(symbol)
-    # And finally, just equities.
-    elif itype == 'Equity' or itype is not None:
-        inst = beansym.Instrument(underlying=symbol)
-    else:
-        raise ValueError(f"Unknown instrument type: {itype}")
-    return inst
-
-
 _HANDLERS = {
     'Money Movement': DoMoneyMovement,
     'Trade': DoTrade,
@@ -320,10 +240,10 @@ def FixMultiplier(_: str, rec: Record) -> int:
         pass
     elif itype == 'Future Option':
         assert multiplier == 1
-        multiplier = futures.MULTIPLIERS[rec._Instrument.underlying]
+        multiplier = rec._Instrument.multiplier
     elif itype == 'Future':
         assert multiplier == 0
-        multiplier = futures.MULTIPLIERS[rec._Instrument.underlying]
+        multiplier = rec._Instrument.multiplier
     elif itype == 'Equity Option':
         assert multiplier == 100
     elif itype == 'Equity':
@@ -354,10 +274,10 @@ def PrepareTable(table: petl.Table) -> petl.Table:
                        'Strike Price'], ToDecimal)
 
              # Create a normalized symbol.
-             .addfield('_Instrument', lambda r: ParseSymbol(
+             .addfield('_Instrument', lambda r: tastysyms.ParseSymbol(
                  r['Symbol'], r['Instrument Type']))
              .addfield('BeanSym', lambda r: (
-                 beansym.ToString(r._Instrument) if r._Instrument else ''))
+                 str(r._Instrument) if r._Instrument else ''))
 
              # Set the multiplier for futures contracts.
              .convert('Multiplier', FixMultiplier, pass_row=True)
