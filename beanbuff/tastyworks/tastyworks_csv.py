@@ -1,5 +1,6 @@
-"""Tastyworks brokerage transaction download.
+"""Tastyworks transactions download.
 
+Click on "History" >> "Transactions" >> [period] >> [CSV]
 """
 import csv
 import re
@@ -7,7 +8,7 @@ import itertools
 import datetime
 import collections
 import typing
-from typing import Any, Union, List, Optional
+from typing import Any, Dict, Union, List, Optional
 from decimal import Decimal
 
 from ameritrade import options
@@ -19,6 +20,7 @@ petl.config.look_style = 'minimal'
 from beancount.core.amount import Amount
 from beancount.core.position import CostSpec
 from beancount.core.inventory import Inventory
+from beancount.core.account import Account
 from beancount.core import data
 from beancount.core import position
 from beancount.core import inventory
@@ -34,6 +36,9 @@ from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
+from beanbuff.data import futures
+from beanbuff.data import beansym
+
 
 OPTION_CONTRACT_SIZE = 100
 Table = petl.Table
@@ -48,7 +53,9 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
         'currency'            : 'Currency used for cash account',
         'asset_cash'          : 'Cash account',
         'asset_equity'        : 'Account for all positions, with {symbol} format',
-        'asset_option'        : 'Account for stock positions',
+        'asset_equity_option' : 'Account for all options',
+        'asset_future'        : 'Account for all futures outright contracts',
+        'asset_future_option' : 'Account for all futures options contracts',
         'fees'                : 'Fees',
         'commissions'         : 'Commissions',
         'dividend'            : 'Taxable dividend income, with {symbol} format',
@@ -64,7 +71,12 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
     def extract(self, file):
         table = petl.fromcsv(file.name)
         ptable = PrepareTable(table)
-        #print(ptable.lookallstr())
+        if 0:
+            print()
+            print()
+            print(ptable.lookallstr())
+            print()
+            print()
 
         entries = []
         for index, row in enumerate(ptable.records()):
@@ -120,30 +132,55 @@ def CreateTransaction(row: Record, meta: dict, config: Config) -> data.Transacti
 
 def DoMoneyMovement(row: Record, meta: dict, config: Config):
     txn = CreateTransaction(row, meta, config)
-    assert row.Quantity == ZERO
-    assert row['Average Price'] == ZERO
 
     if re.match('Wire Funds', row.Description):
         posting = txn.postings[0]
         txn.postings.append(
             posting._replace(account=config['third_party'],
                              units=-posting.units))
+        assert row.Quantity == ZERO, row
+        assert row['Average Price'] == ZERO
 
     elif re.match('Regulatory fee adjustment', row.Description):
         posting = txn.postings[0]
         txn.postings.append(
             posting._replace(account=config['fees'],
                              units=-posting.units))
+        assert row.Quantity == ZERO, row
+        assert row['Average Price'] == ZERO
+
+    else:
+        # TODO(blais): Add transfers to/from margin on mark-to-market events or
+        # not? How to ensure that the final P/L is accounted for properly if so?
+        #
+        #raise NotImplementedError("Row not handled: {}".format(row))
+        txn = txn._replace(postings=[])
 
     return [txn]
 
 
+def GetAccount(row: Record, config: Dict[str, Any]) -> Account:
+    """Get the account corresponding to the row."""
+    itype = row['Instrument Type']
+    if itype == 'Equity':
+        symbol = row['Underlying Symbol']
+        return config['asset_equity'].format(symbol=symbol)
+    elif itype == 'Equity Option':
+        return config['asset_equity_option']
+    elif itype == 'Future':
+        symbol = row['Symbol']
+        return config['asset_future'].format(symbol=symbol[1:])
+    elif itype == 'Future Option':
+        return config['asset_future_option']
+    else:
+        raise NotImplementedError("Unknown underlying type: {}".format(row))
+
+
 def DoTrade(row: Record, meta: dict, config: Config):
     txn = CreateTransaction(row, meta, config)
-    optsym = ParseSymbol(row.Symbol)
 
     sign = 1 if row.Instruction == 'BUY' else -1
-    units = Amount(sign * row.Quantity * row.Multiplier, optsym)
+    units = Amount(sign * row.Quantity * row.Multiplier, row['BeanSym'])
 
     unit_price = row['Average Price'] / row.Multiplier
     unit_price = -sign * unit_price
@@ -154,58 +191,98 @@ def DoTrade(row: Record, meta: dict, config: Config):
     elif row.Effect == 'CLOSING':
         cost = CostSpec(None, None, config['currency'], None, None, False)
         price = Amount(unit_price, config['currency'])
-
         txn.postings.append(
             data.Posting(config['pnl'], None, None, None, None, None))
     else:
-        raise NotImplementedError("No effect, not sure what to do.")
+        # Futures contracts have no opening/closing indicator. Treat them like
+        # opening for now, and we'll fixup the closing bits by hand.
+        cost = CostSpec(unit_price, None, config['currency'], None, None, False)
+        price = None
+        #raise NotImplementedError("No effect, not sure what to do: {}".format(row))
 
+    account = GetAccount(row, config)
     txn.postings.insert(
-        0, data.Posting(config['asset_option'], units, cost, price, None, None))
+        0, data.Posting(account, units, cost, price, None, None))
 
     return [txn]
 
 
-_FUTSYM = "[A-Z0-9]+[FGHJKMNQUVXZ][0-9]"
+def ParseEquityOptionSymbol(symbol: str) -> str:
+    # e.g. 'TLRY  210416C00075000' for equity option;
+    return beansym.Instrument(
+        underlying=symbol[0:6].rstrip(),
+        expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
+        side=symbol[12],
+        strike=Decimal(symbol[13:21]) / _PRICE_DIVISOR,
+        multiplier=OPTION_CONTRACT_SIZE)
+
+
+FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
+
+
+def ParseFuturesSymbol(symbol: str) -> str:
+    match = re.match(f"/{FUTSYM}", symbol)
+    assert match
+    underlying, fmonth, fyear = match.groups()
+    underlying = f"/{underlying}"
+    decade = datetime.date.today().year % 100 // 10
+    multiplier = futures.MULTIPLIERS.get(underlying, 1)
+    return beansym.Instrument(
+        underlying=underlying,
+        calendar=f"{fmonth}{decade}{fyear}",
+        multiplier=multiplier)
+
 
 def ParseFuturesOptionSymbol(symbol: str) -> str:
     # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
-    match = re.match(fr"\.(/{_FUTSYM}) ({_FUTSYM}) (\d{{6}})([CP])([0-9.]+)", symbol)
-    underlying = match.group(1)
+    match = re.match(fr"\./{FUTSYM} +{FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
+
+    underlying, fmonth, fyear = match.group(1,2,3)
     decade = datetime.date.today().year % 100 // 10
-    underlying = underlying[:-1] + str(decade) + underlying[-1:]
-    optname = match.group(2)
-    side = match.group(4)
-    strike = Decimal(match.group(5))
+    calendar = f"{fmonth}{decade}{fyear}"
 
-    # TODO(blais): Support options on futures... need to include the expiration date
-    # AND the option name somehow.
-    return f"{underlying}_{optname}{side}{strike}"
+    optcontract, optfmonth, optfyear = match.group(4,5,6)
+    optdecade = datetime.date.today().year % 100 // 10
+    optcalendar = f"{optfmonth}{optdecade}{optfyear}"
 
+    expistr = match.group(7)
+    expiration = datetime.date(int(expistr[0:2]), int(expistr[2:4]), int(expistr[4:6]))
+    side = match.group(8)
+    strike = Decimal(match.group(9))
 
-def ParseEquityOptionSymbol(symbol: str) -> str:
-    # e.g. 'TLRY  210416C00075000' for equity option;
-    underlying = symbol[0:6].rstrip()
-    year = int(symbol[6:8])
-    month = int(symbol[8:10])
-    day = int(symbol[10:12])
-    side = symbol[12]
-    expiration = datetime.date(year, month, day)
-    strike = Decimal(symbol[13:21]) / _PRICE_DIVISOR
-    opt = options.Option(underlying, expiration, strike, side)
-    return options.MakeOptionSymbol(opt)
+    return beansym.Instrument(
+        underlying=f"/{underlying}",
+        calendar=calendar,
+        optcontract=optcontract,
+        optcalendar=optcalendar,
+        expiration=expiration,
+        side=side,
+        strike=strike,
+        multiplier=1)  ## TODO(blais):
 
 
 _PRICE_DIVISOR = Decimal('1000')
 
 
-def ParseSymbol(symbol: str) -> options.Option:
-    if symbol.startswith("."):
-        return ParseFuturesOptionSymbol(symbol)
+def ParseSymbol(symbol: str, itype: Optional[str]) -> options.Option:
+    if not symbol:
+        return None
+    # Futures options always start with a period.
+    inst = None
+    if itype == 'Future Option' or itype is None and symbol.startswith("./"):
+        inst = ParseFuturesOptionSymbol(symbol)
+    # Futures always start with a slash.
+    elif itype == 'Future' or itype is None and symbol.startswith("/"):
+        inst = ParseFuturesSymbol(symbol)
+    # Then we have options, with a space.
+    elif itype == 'Equity Option' or itype is None and ' ' in symbol:
+        inst = ParseEquityOptionSymbol(symbol)
+    # And finally, just equities.
+    elif itype == 'Equity' or itype is not None:
+        inst = beansym.Instrument(underlying=symbol)
     else:
-        return ParseEquityOptionSymbol(symbol)
-
-
+        raise ValueError(f"Unknown instrument type: {itype}")
+    return inst
 
 
 _HANDLERS = {
@@ -236,6 +313,26 @@ def ToDecimal(value: str):
     return Decimal(value.replace(',', '')) if value else ZERO
 
 
+def FixMultiplier(_: str, rec: Record) -> int:
+    multiplier = int(rec.Multiplier) if rec.Multiplier else 0
+    itype = rec['Instrument Type']
+    if not itype:
+        pass
+    elif itype == 'Future Option':
+        assert multiplier == 1
+        multiplier = futures.MULTIPLIERS[rec._Instrument.underlying]
+    elif itype == 'Future':
+        assert multiplier == 0
+        multiplier = futures.MULTIPLIERS[rec._Instrument.underlying]
+    elif itype == 'Equity Option':
+        assert multiplier == 100
+    elif itype == 'Equity':
+        assert multiplier == 1
+    else:
+        raise ValueError(f"Unknown instrument type: {itype}")
+    return multiplier
+
+
 def PrepareTable(table: petl.Table) -> petl.Table:
     """Prepare the table for processing."""
 
@@ -254,8 +351,20 @@ def PrepareTable(table: petl.Table) -> petl.Table:
                        'Quantity',
                        'Commissions',
                        'Fees',
-                       'Multiplier',
                        'Strike Price'], ToDecimal)
+
+             # Create a normalized symbol.
+             .addfield('_Instrument', lambda r: ParseSymbol(
+                 r['Symbol'], r['Instrument Type']))
+             .addfield('BeanSym', lambda r: (
+                 beansym.ToString(r._Instrument) if r._Instrument else ''))
+
+             # Set the multiplier for futures contracts.
+             .convert('Multiplier', FixMultiplier, pass_row=True)
+             .cutout('_Instrument')
+
+             # Check out the contract value.
+             #.addfield('ContractValue', lambda r: r.Multiplier * r['Strike Price'])
              )
 
     # Verify that the description field matches the provided field breakdowns.
@@ -267,9 +376,11 @@ def PrepareTable(table: petl.Table) -> petl.Table:
 if __name__ == '__main__':
     importer = Importer(filing='Assets:US:Tastyworks', config={
         'currency'            : 'USD',
-        'asset_cash'          : 'Assets:US:Tastyworks:Cash',
-        'asset_equity'        : 'Assets:US:Tastyworks:Stocks:{symbol}',
-        'asset_option'        : 'Assets:US:Tastyworks:Options',
+        'asset_cash'          : 'Assets:US:Tastyworks:Main:Cash',
+        'asset_equity'        : 'Assets:US:Tastyworks:Main:Equities',
+        'asset_equity_option' : 'Assets:US:Tastyworks:Main:Equities',
+        'asset_future'        : 'Assets:US:Tastyworks:Main:Futures',
+        'asset_future_option' : 'Assets:US:Tastyworks:Main:Futures',
         'fees'                : 'Expenses:Financial:Fees',
         'commissions'         : 'Expenses:Financial:Commissions',
         'dividend'            : 'Income:US:Tastyworks:Stocks:{symbol}:Dividend',

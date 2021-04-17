@@ -63,6 +63,11 @@ class Txn(NamedTuple):
     # The id linking closing transactions to their corresponding opening ones.
     # This is normally not provided by the importers, and is filled in later by
     # analysis code.
+    #
+    # Note the inherent conflict in the 1:1 relationship here: a single
+    # transactions may close multiple opening ones and vice-versa. In order to
+    # make this a 1:1 match, we may have to split one or both of the
+    # opening/closing sides. TODO(blais): Review this.
     match_id: Optional[str]
 
     # Trade, chain or strategy id linking together related transactions over
@@ -94,6 +99,8 @@ class Txn(NamedTuple):
 
     # The symbol for the underlying instrument. This may be an equity, equity
     # option, futures, futures option or spot currency pair.
+    #
+    # TODO(blais): Turn this to 'underyling' and add detail columns for options.
     symbol: str
 
     # The currency that the instrument is quoted in.
