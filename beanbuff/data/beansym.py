@@ -44,6 +44,16 @@ class Instrument(NamedTuple):
         """Convert an instrument to a string code."""
         return ToString(self)
 
+    @property
+    def dated_underlying(self) -> str:
+        """Return the expiration code."""
+        return GetDatedUnderlying(self)
+
+    @property
+    def expcode(self) -> str:
+        """Return the expiration code."""
+        return GetExpirationCode(self)
+
 
 def ToString(inst: Instrument) -> str:
     """Convert an instrument to a string code."""
@@ -80,3 +90,18 @@ def ToString(inst: Instrument) -> str:
                 inst.underlying, inst.expiration, inst.side, inst.strike)
         else:
             return inst.underlying
+
+
+def GetDatedUnderlying(inst: Instrument) -> str:
+    """Return the underlying name with the month code, if present."""
+    if inst.calendar:
+        return "{}{}".format(inst.underlying, inst.calendar)
+    return inst.underlying
+
+
+def GetExpirationCode(inst: Instrument) -> str:
+    """Return the futures option expiration code."""
+    if inst.optcontract:
+        assert inst.optcalendar, inst
+        return "{}{}".format(inst.optcontract, inst.optcalendar)
+    return ''

@@ -40,6 +40,7 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
 from beanbuff.tastyworks import tastysyms
+from beanbuff.tastyworks import tastyworks_transactions
 
 
 Table = petl.Table
@@ -70,12 +71,11 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
     ]
 
     def extract(self, file):
-        table = petl.fromcsv(file.name)
-        ptable = PrepareTable(table)
+        trade_table, other_table = tastyworks_transactions.GetTransactions(file.name)
         if 1:
             print()
             print()
-            print(ptable.lookallstr())
+            print(trade_table.lookallstr())
             print()
             print()
 
@@ -212,88 +212,6 @@ _HANDLERS = {
     'Money Movement': DoMoneyMovement,
     'Trade': DoTrade,
 }
-
-
-def Instruction(r: Record) -> Optional[str]:
-    if r.Action.startswith('BUY'):
-        return 'BUY'
-    if r.Action.startswith('SELL'):
-        return 'SELL'
-    else:
-        return None
-
-
-def Effect(r: Record) -> Optional[str]:
-    if r.Action.endswith('TO_OPEN'):
-        return 'OPENING'
-    elif r.Action.endswith('TO_CLOSE'):
-        return 'CLOSING'
-    else:
-        return None
-
-
-def ToDecimal(value: str):
-    return Decimal(value.replace(',', '')) if value else ZERO
-
-
-def FixMultiplier(_: str, rec: Record) -> int:
-    multiplier = int(rec.Multiplier) if rec.Multiplier else 0
-    itype = rec['Instrument Type']
-    if not itype:
-        pass
-    elif itype == 'Future Option':
-        assert multiplier == 1
-        multiplier = rec._Instrument.multiplier
-    elif itype == 'Future':
-        assert multiplier == 0
-        multiplier = rec._Instrument.multiplier
-    elif itype == 'Equity Option':
-        assert multiplier == 100
-    elif itype == 'Equity':
-        assert multiplier == 1
-    else:
-        raise ValueError(f"Unknown instrument type: {itype}")
-    return multiplier
-
-
-def PrepareTable(table: petl.Table) -> petl.Table:
-    """Prepare the table for processing."""
-
-    table = (table
-             # Parse the date into datetime.
-             .convert('Date', parser.parse)
-             .convert('Expiration Date', lambda x: parser.parse(x).date())
-             # Sort by date incremental.
-             .sort('Date')
-             # Split 'Action' field.
-             .addfield('Instruction', Instruction)
-             .addfield('Effect', Effect)
-             # Convert fields to Decimal values.
-             .convert(['Value',
-                       'Average Price',
-                       'Quantity',
-                       'Commissions',
-                       'Fees',
-                       'Strike Price'], ToDecimal)
-
-             # Create a normalized symbol.
-             .addfield('_Instrument', lambda r: tastysyms.ParseSymbol(
-                 r['Symbol'], r['Instrument Type']))
-             .addfield('BeanSym', lambda r: (
-                 str(r._Instrument) if r._Instrument else ''))
-
-             # Set the multiplier for futures contracts.
-             .convert('Multiplier', FixMultiplier, pass_row=True)
-             .cutout('_Instrument')
-
-             # Check out the contract value.
-             #.addfield('ContractValue', lambda r: r.Multiplier * r['Strike Price'])
-             )
-
-    # Verify that the description field matches the provided field breakdowns.
-    # TODO(blais): Do this.
-
-    return table
 
 
 if __name__ == '__main__':

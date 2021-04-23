@@ -1,3 +1,5 @@
+## TODO(blais): Remove and replace by simple petl tables as per `transactions.md`.
+
 """A trading transaction as a single table row.
 
 This module defines a common format for expressing transactions involving
