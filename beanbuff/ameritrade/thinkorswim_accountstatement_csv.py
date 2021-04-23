@@ -52,11 +52,12 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
 from beanbuff.data.rowtxns import Txn, TxnType, Instruction, Effect
-from beanbuff.data.futures import MULTIPLIERS
 from beanbuff.data import beantxns
+from beanbuff.data import futures
+from beanbuff.data import beansym
 
 
-OPTION_CONTRACT_SIZE = Decimal(100)
+
 Table = petl.Table
 Record = petl.Record
 debug = False
@@ -106,6 +107,8 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
 
     def extract(self, file):
         """Import a CSV file from Think-or-Swim."""
+        print()
+        print()
         tables = PrepareTables(file.name)
 
         # Pull out the trading log which contains trade information over all the
@@ -143,7 +146,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
         # TODO(blais): Add type (FUTURES, ETF, CALL, PUT, etc.)
         # TODO(blais): Add finalized option symbol.
 
-        if 1:
+        if 0:
             # Debug print.
             txns = petl.cat(
                 petl.wrap(chain([Txn._fields], equities_txns)),
@@ -151,7 +154,7 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
             table = (petl.wrap(txns)
                      .addfield('size', lambda r: r.multiplier * r.price * r.quantity))
                      #.select('size', lambda v: v > 10000))
-            print(table.lookallstr())
+            print(table.head(10).lookallstr())
 
         bconfig = beantxns.Config(
             self.config['currency'],
@@ -336,7 +339,7 @@ def FindMultiplier(string: str) -> Decimal:
             raise ValueError("No symbol to find multiplier: '{}'".format(string))
         symbol = match.group(1)
         try:
-            multiplier = MULTIPLIERS[symbol]
+            multiplier = futures.MULTIPLIERS[symbol]
         except KeyError:
             raise ValueError("No multiplier for symbol: '{}'".format(symbol))
         return Decimal(multiplier)
@@ -399,7 +402,7 @@ def ConvertGroupsToTransactions(groups: List[Group],
             if trade_rows[0].type == 'FUTURE':
                 multiplier = FindMultiplier(description)
             elif trade_rows[0].type in {'CALL', 'PUT'}:
-                multiplier = OPTION_CONTRACT_SIZE
+                multiplier = Decimal(futures.OPTION_CONTRACT_SIZE)
             else:
                 multiplier = ONE
 
@@ -498,6 +501,11 @@ def CashBalance_Prepare(table: Table) -> Table:
         # balances.
         .addfieldusingcontext('misc_fees', _ComputeMiscFees)
     )
+
+    if 0:
+        print("CashBalance_Prepare\n",
+              table.head(10).lookallstr()); # TODO(blais): Remove
+
     return ParseDescription(table)
 
 def _ComputeMiscFees(prev: Record, rec: Record, _: Record) -> Decimal:
@@ -528,6 +536,11 @@ def FuturesStatements_Prepare(table: Table) -> Table:
         .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), ToDecimal)
         .convert('ref', lambda v: int(v) if v else 0)
     )
+
+    if 0:
+        print("FuturesStatements_Prepare\n",
+              table.head(10).lookallstr()); # TODO(blais): Remove
+
     return ParseDescription(table)
 
 
@@ -557,21 +570,122 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .convert(('qty', 'price', 'strike'), ToDecimal, pass_row=True)
 
         # Convert pos effect to single word naming.
-        .convert('pos_effect', lambda r: 'OPENING' if 'TO OPEN' else 'CLOSING')
+        .convert('pos_effect', lambda r: 'OPENING' if r == 'TO OPEN' else 'CLOSING')
 
         # Convert order ids to integers (because they area).
         .convert('order_id', lambda v: int(v) if v else 0)
 
+        # Infer instrument type.
+        .addfield('inst_type', InferInstrumentType)
+
         # Normalize and fixup the symbols to remove the multiplier and month
         # string. '/CLK21 1/1000 MAY 21' is redundant.
-        .rename('symbol', 'orig_symbol')
-        .addfield('symbol', lambda r: r.orig_symbol.split()[0])
+        .addfield('underlying', lambda r: r.symbol.split()[0])
+        .convert('underlying', lambda v: SYMBOL_NAME_CHANGES.get(v, v))
 
-        # Apply symbol changes.
-        .convert('symbol', lambda v: SYMBOL_NAME_CHANGES.get(v, v))
+        # Generate Beancount symbol from the row.
+        .addfield('_instrument', ToInstrument)
+        .addfield('beansym', lambda r: beansym.ToString(r._instrument))
+        .cutout('_instrument')
+
+        # Add multiplier and check.
+        #.addfield('multiplier', ComputeMultiplier)
+
+        # Remove unnecessary fields.
+        .cutout('order_type')
     )
 
+    print("AccountTradeHistory_Prepare\n",
+          table.lookallstr()); # TODO(blais): Remove
+
     return table
+
+
+def InferInstrumentType(rec: Record) -> str:
+    """Infer the instrument type from the rows of the trading table."""
+    if rec.type in {'STOCK', 'ETF'}:
+        assert rec.spread in {'STOCK', 'COVERED'}, rec
+        # Stock.
+        return 'Equity'
+    elif rec.type == 'FUTURE':
+        # Futures outright.
+        return 'Future'
+    elif rec.type in {'CALL', 'PUT'}:
+        if rec.exp.startswith('/'):
+            # Process an equity option.
+            return 'Future Option'
+        else:
+            return 'Equity Option'
+    raise ValueError("Could not infer instrument type for {}".format(rec))
+
+
+def ToInstrument(rec: Record) -> str:
+    """Generate an Instrument symbol from the row."""
+
+    if rec.inst_type == 'Equity':
+        return beansym.Instrument(underlying=rec.underlying)
+
+    elif rec.inst_type == 'Future':
+        return beansym.Instrument(underlying=rec.underlying[:-3],
+                                  calendar=rec.underlying[-3:])
+
+    elif rec.inst_type == 'Equity Option':
+        expiration = datetime.datetime.strptime(rec.exp.upper(), '%d %b %y').date()
+        assert rec.type in {'CALL', 'PUT'}
+        return beansym.Instrument(underlying=rec.underlying[:-3],
+                                  calendar=rec.underlying[-3:],
+                                  expiration=expiration,
+                                  strike=Decimal(rec.strike),
+                                  side=rec.type[0],
+                                  multiplier=futures.OPTION_CONTRACT_SIZE)
+
+    elif rec.inst_type == 'Future Option':
+        assert rec.exp.startswith('/')
+        # TODO(blais): Infer the actual expiration date from CME specs.
+        return beansym.Instrument(underlying=rec.underlying[:-3],
+                                  calendar=rec.underlying[-3:],
+                                  optcontract=rec.exp[1:-3],
+                                  optcalendar=rec.exp[-3:],
+                                  expiration=None,
+                                  strike=Decimal(rec.strike),
+                                  side=rec.type[0],
+                                  multiplier=futures.OPTION_CONTRACT_SIZE)
+
+    else:
+        raise ValueError("Could not infer Beansym for {}".format(rec))
+
+
+def ComputeMultiplier(rec: Record) -> str:
+    """Compute the multiplier for the instrument."""
+
+    match = re.match(r"(/[A-Z0-9]+)[FGHJKMNQUVXZ]2[0-9] 1/(\d+) ", rec.symbol)
+    code, mult_str = match.groups()
+    multiplier = int(mult_str)
+
+
+
+    multiplier = int(rec.Multiplier) if rec.Multiplier else 0
+    itype = rec['Instrument Type']
+    if not itype:
+        pass
+    elif itype == 'Future Option':
+        assert multiplier == 1
+        multiplier = rec._Instrument.multiplier
+    elif itype == 'Future':
+        assert multiplier == 0
+        multiplier = rec._Instrument.multiplier
+    elif itype == 'Equity Option':
+        assert multiplier == 100
+    elif itype == 'Equity':
+        assert multiplier == 1
+    else:
+        raise ValueError(f"Unknown instrument type: {itype}")
+
+
+
+
+    return multiplier
+
 
 
 def ParseDateTimePair(date_field: str, time_field: str, rec: Record) -> datetime.date:

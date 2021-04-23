@@ -25,7 +25,8 @@ class Instrument(NamedTuple):
     optcalendar: Optional[str] = None
 
     # For options, the expiration date for the options contract. For options on
-    # futures, this should be compatible with the 'fo_calendar' field.
+    # futures, this is the expitation of the option, not of the underlying; this
+    # should be compatible with the 'optcalendar' field.
     expiration: Optional[datetime.date] = None
 
     # For options, the strike price.
@@ -48,14 +49,34 @@ def ToString(inst: Instrument) -> str:
     """Convert an instrument to a string code."""
 
     if inst.optcontract:
-        return "{}{}_{}{}_{:%y%m%d}_{}{}".format(
-            inst.underlying, inst.calendar,
-            inst.optcontract, inst.optcalendar,
-            inst.expiration, inst.side, inst.strike)
+        # Future Option
+        #
+        # Note: For options on futures, the correct expiration date isn't always
+        # available (e.g. from TOS). We ignore it for that reason, the date is
+        # implicit in the option code. It's not very precise, but better to be
+        # consistent.
+        ## inst.expiration is not None:
+        if False:
+            # With date
+            return "{}{}_{}{}_{:%y%m%d}_{}{}".format(
+                inst.underlying, inst.calendar,
+                inst.optcontract, inst.optcalendar,
+                inst.expiration, inst.side, inst.strike)
+        else:
+            # Without date
+            return "{}{}_{}{}_{}{}".format(
+                inst.underlying, inst.calendar,
+                inst.optcontract, inst.optcalendar,
+                inst.side, inst.strike)
 
     elif inst.calendar:
+        # Future
         return "{}{}".format(inst.underlying, inst.calendar)
 
     else:
-        return "{}_{:%y%m%d}_{}{}".format(
-            inst.underlying, inst.expiration, inst.side, inst.strike)
+        # Equity option
+        if inst.expiration is not None:
+            return "{}_{:%y%m%d}_{}{}".format(
+                inst.underlying, inst.expiration, inst.side, inst.strike)
+        else:
+            return inst.underlying

@@ -73,7 +73,7 @@ USD = "USD"
 
 
 # Standard options contract size.
-CSIZE = 100
+OPTION_CONTRACT_SIZE = 100
 
 
 # Configuration file.
@@ -432,7 +432,7 @@ def DoTrade(txn, commodities):
         account = config['asset_position'].format(symbol='Options')
         # Note: The contract size isn't present. If we find varying contract
         # size we could consider calling the API again to find out what it is.
-        amount *= CSIZE
+        amount *= OPTION_CONTRACT_SIZE
 
         # Open a new Commodity directive for that one option product.
         if not is_closing and symbol not in commodities:
@@ -519,7 +519,7 @@ def DoRemovalOfOption(txn, balances):
     # Note: The contract size isn't present. If we find varying contract
     # size we could consider calling the API again to find out what it is.
     amt = DF(item['amount'], QO)
-    amt *= CSIZE
+    amt *= OPTION_CONTRACT_SIZE
 
     # Find the current amount in the given account to figure out the side of the
     # position and the appropriate side to remove. {492fa5292636}
@@ -681,7 +681,7 @@ def GetExpiredOptionsPrices(positions: JSON,
                     price = ZERO
                 else:
                     quantity = Decimal(pos['longQuantity'] - pos['shortQuantity'])
-                    price = Decimal(pos['marketValue']) / (quantity * CSIZE)
+                    price = Decimal(pos['marketValue']) / (quantity * OPTION_CONTRACT_SIZE)
 
                 price_entries.append(
                     data.Price(fileloc, date, currency, Amount(price, USD)))

@@ -31,7 +31,6 @@ def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
     return inst
 
 
-_OPTION_CONTRACT_SIZE = 100
 _PRICE_DIVISOR = Decimal('1000')
 
 
@@ -42,7 +41,7 @@ def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
         expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
         side=symbol[12],
         strike=Decimal(symbol[13:21]) / _PRICE_DIVISOR,
-        multiplier=_OPTION_CONTRACT_SIZE)
+        multiplier=futures.OPTION_CONTRACT_SIZE)
 
 
 FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
