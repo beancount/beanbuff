@@ -1,4 +1,4 @@
-"""Parsing symbols from Tastyworks to BeanSyms."""
+"""Parsing symbols from Tastyworks to a common normalized symbology called `BeanSyms`."""
 
 import datetime
 import re
@@ -31,7 +31,8 @@ def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
     return inst
 
 
-_PRICE_DIVISOR = Decimal('1000')
+# Divisor for TW strike prices.
+_STRIKE_PRICE_DIVISOR = Decimal('1000')
 
 
 def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
@@ -40,15 +41,15 @@ def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
         underlying=symbol[0:6].rstrip(),
         expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
         side=symbol[12],
-        strike=Decimal(symbol[13:21]) / _PRICE_DIVISOR,
+        strike=Decimal(symbol[13:21]) / _STRIKE_PRICE_DIVISOR,
         multiplier=futures.OPTION_CONTRACT_SIZE)
 
 
-FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
+_FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
 
 
 def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
-    match = re.match(f"/{FUTSYM}", symbol)
+    match = re.match(f"/{_FUTSYM}", symbol)
     assert match
     underlying, fmonth, fyear = match.groups()
     underlying = f"/{underlying}"
@@ -62,7 +63,7 @@ def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
 
 def _ParseFuturesOptionSymbol(symbol: str) -> beansym.Instrument:
     # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
-    match = re.match(fr"\.(/[^ ]+) +{FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
+    match = re.match(fr"\.(/[^ ]+) +{_FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
 
     inst = _ParseFuturesSymbol(match.group(1))
     optcontract, optfmonth, optfyear = match.group(2,3,4)

@@ -1,6 +1,9 @@
-"""Tastyworks transactions download.
+"""Parse and normalize Tastyworks transactions history CSV file.
 
 Click on "History" >> "Transactions" >> [period] >> [CSV]
+
+This produces a standardized transactions history log and a separate
+non-transaction log.
 """
 import csv
 import re
