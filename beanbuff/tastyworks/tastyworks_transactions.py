@@ -173,7 +173,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              .rename('Description', 'description')
              .rename('Call or Put', 'side')
              .rename('Quantity', 'quantity')
-             .rename('Value', 'amount')
+             .rename('Value', 'cost')
              .rename('Commissions', 'commissions')
              .rename('Fees', 'fees')
 
@@ -198,7 +198,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
                   'instype', 'underlying', 'expiration', 'expcode',
                   'side', 'strike', 'multiplier',
                   'effect', 'instruction', 'quantity', 'price',
-                  'amount', 'commissions', 'fees',
+                  'cost', 'commissions', 'fees',
                   'description')
              )
 

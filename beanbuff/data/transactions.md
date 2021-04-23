@@ -63,9 +63,9 @@ A *normalized* transactions table contains the following columns and types.
 - `quantity`: A positive number for the quantity of items.
 
 - `price`: The per-contract price for the instrument. Multply this by the
-  `quantity` and the `multiplier` to get the `amount`.
+  `quantity` and the `multiplier` to get the `cost`.
 
-- `amount`: The dollar amount of the position change minus commissions and fees.
+- `cost`: The dollar amount of the position change minus commissions and fees.
   This is a signed number.
 
 - `commissions`: The dollar amount of commissions charged. This is a signed
