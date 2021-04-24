@@ -1,59 +1,113 @@
-from decimal import Decimal
+from decimal import Decimal as D
 import unittest
 
 from beanbuff.data import match
 
 
-class TestMatch(unittest.TestCase):
+def _CreateTestMatchId(transaction_id: str) -> str:
+    return "m-{}".format(transaction_id)
+
+
+match.NanoInventory.create_id_fn = staticmethod(_CreateTestMatchId)
+match.FifoInventory.create_id_fn = staticmethod(_CreateTestMatchId)
+
+
+class TestNanoInventory(unittest.TestCase):
 
     def test_buy_sell(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+2), 'A'))
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'B'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.match(Decimal(-1), 'C'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.match(Decimal(-1), 'D'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.match(Decimal(-1), 'E'))
-        self.assertEqual((Decimal(0), 'm-F'), inv.match(Decimal(-1), 'F'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+2), 'A'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'B'))
+        self.assertEqual((D(-1), 'm-A'), inv.match(D(-1), 'C'))
+        self.assertEqual((D(-1), 'm-A'), inv.match(D(-1), 'D'))
+        self.assertEqual((D(-1), 'm-A'), inv.match(D(-1), 'E'))
+        self.assertEqual((D(0), 'm-F'), inv.match(D(-1), 'F'))
 
     def test_sell_buy(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(-2), 'A'))
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(-1), 'B'))
-        self.assertEqual((Decimal(+1), 'm-A'), inv.match(Decimal(+1), 'C'))
-        self.assertEqual((Decimal(+1), 'm-A'), inv.match(Decimal(+1), 'D'))
-        self.assertEqual((Decimal(+1), 'm-A'), inv.match(Decimal(+1), 'E'))
-        self.assertEqual((Decimal(0), 'm-F'), inv.match(Decimal(+1), 'F'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(-2), 'A'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(-1), 'B'))
+        self.assertEqual((D(+1), 'm-A'), inv.match(D(+1), 'C'))
+        self.assertEqual((D(+1), 'm-A'), inv.match(D(+1), 'D'))
+        self.assertEqual((D(+1), 'm-A'), inv.match(D(+1), 'E'))
+        self.assertEqual((D(0), 'm-F'), inv.match(D(+1), 'F'))
 
     def test_crossover(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'A'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.match(Decimal(-2), 'B'))
-        self.assertEqual((Decimal(+1), 'm-A'), inv.match(Decimal(+2), 'C'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.match(Decimal(-1), 'D'))
-        self.assertEqual((Decimal(0), 'm-E'), inv.match(Decimal(-3), 'E'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'A'))
+        self.assertEqual((D(-1), 'm-A'), inv.match(D(-2), 'B'))
+        self.assertEqual((D(+1), 'm-A'), inv.match(D(+2), 'C'))
+        self.assertEqual((D(-1), 'm-A'), inv.match(D(-1), 'D'))
+        self.assertEqual((D(0), 'm-E'), inv.match(D(-3), 'E'))
 
     def test_multiple(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'A'))
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'B'))
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'C'))
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'D'))
-        self.assertEqual((Decimal(-4), 'm-A'), inv.match(Decimal(-5), 'E'))
-        self.assertEqual((Decimal(1), 'm-A'), inv.match(Decimal(+1), 'F'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'A'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'B'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'C'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'D'))
+        self.assertEqual((D(-4), 'm-A'), inv.match(D(-5), 'E'))
+        self.assertEqual((D(1), 'm-A'), inv.match(D(+1), 'F'))
 
     def test_expire_zero(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.expire('A'))
-        self.assertEqual((Decimal(0), 'm-B'), inv.expire('B'))
+        self.assertEqual((D(0), None), inv.expire('A'))
+        self.assertEqual((D(0), None), inv.expire('B'))
 
     def test_expire_nonzero(self):
         inv = match.NanoInventory()
-        self.assertEqual((Decimal(0), 'm-A'), inv.match(Decimal(+1), 'A'))
-        self.assertEqual((Decimal(-1), 'm-A'), inv.expire('A'))
+        self.assertEqual((D(0), 'm-A'), inv.match(D(+1), 'A'))
+        self.assertEqual((D(-1), 'm-A'), inv.expire('A'))
 
-        self.assertEqual((Decimal(0), 'm-B'), inv.match(Decimal(-1), 'B'))
-        self.assertEqual((Decimal(0), 'm-B'), inv.match(Decimal(-1), 'C'))
-        self.assertEqual((Decimal(+2), 'm-B'), inv.expire('B'))
+        self.assertEqual((D(0), 'm-B'), inv.match(D(-1), 'B'))
+        self.assertEqual((D(0), 'm-B'), inv.match(D(-1), 'C'))
+        self.assertEqual((D(2), 'm-B'), inv.expire('B'))
+
+
+class TestFifoInventory(unittest.TestCase):
+
+    def test_buy_sell(self):
+        inv = match.FifoInventory()
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(+2), D(100), 'A'))
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(+2), D(110), 'B'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.match(D(-1), D(120), 'C'))
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(+2), D(130), 'D'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.match(D(-1), D(140), 'E'))
+        self.assertEqual((D(3), D(2*110 + 130), 'm-A'), inv.match(D(-3), D(150), 'E'))
+
+    def test_sell_buy(self):
+        inv = match.FifoInventory()
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(-2), D(100), 'A'))
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(-2), D(110), 'B'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.match(D(+1), D(120), 'C'))
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(-2), D(130), 'D'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.match(D(+1), D(140), 'E'))
+        self.assertEqual((D(3), D(2*110 + 130), 'm-A'), inv.match(D(+3), D(150), 'E'))
+
+    def test_cross_zero(self):
+        inv = match.FifoInventory()
+        self.assertEqual((D(0),   D(0), 'm-A'), inv.match(D(+1), D(100), 'A'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.match(D(-2), D(110), 'B'))
+        self.assertEqual((D(1), D(110), 'm-A'), inv.match(D(+2), D(120), 'C'))
+        self.assertEqual((D(1), D(120), 'm-A'), inv.match(D(-2), D(130), 'D'))
+        self.assertEqual((D(1), D(130), 'm-A'), inv.match(D(+2), D(140), 'E'))
+        self.assertEqual((D(1), D(140), 'm-A'), inv.match(D(-2), D(150), 'F'))
+        self.assertEqual((D(1), D(150), 'm-A'), inv.match(D(+2), D(160), 'G'))
+        self.assertEqual((D(1), D(160), 'm-A'), inv.match(D(-1), D(170), 'H'))
+
+        # Check that it resets on zero.
+        self.assertEqual((D(0),   D(0), 'm-I'), inv.match(D(-1), D(180), 'I'))
+
+    def test_expire_zero(self):
+        inv = match.FifoInventory()
+        self.assertEqual((D(0), D(0), None), inv.expire('A'))
+        self.assertEqual((D(0), D(0), None), inv.expire('B'))
+
+    def test_expire_nonzero(self):
+        inv = match.FifoInventory()
+        self.assertEqual((D(0), D(0), 'm-A'), inv.match(D(+1), D(100), 'A'))
+        self.assertEqual((D(1), D(100), 'm-A'), inv.expire('B'))
+        self.assertEqual((D(0), D(0), None), inv.expire('C'))
 
 
 if __name__ == '__main__':

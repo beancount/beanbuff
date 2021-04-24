@@ -6,22 +6,21 @@ This produces a standardized transactions history log and a separate
 non-transaction log.
 """
 
+import collections
+from decimal import Decimal
 from os import path
-import logging
-import re
+from typing import Optional, Tuple
 import datetime
 import hashlib
-from typing import Optional, Tuple
-from decimal import Decimal
+import logging
+import pprint
+import re
 
 import click
 from dateutil import parser
 
-import petl
-from petl import Table, Record
-petl.config.look_style = 'minimal'
-petl.config.failonerror = True
-
+from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from beanbuff.data import match
 from beanbuff.tastyworks import tastysyms
 
 
@@ -39,7 +38,7 @@ def GetTransactionId(rec: Record) -> str:
     md5 = hashlib.blake2s(digest_size=6)
     md5.update(rec['Order #'].encode('ascii'))
     md5.update(rec['Description'].encode('ascii'))
-    return md5.hexdigest()
+    return "^{}".format(md5.hexdigest())
 
 
 def GetRowType(rowtype: str) -> str:
@@ -202,7 +201,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
                   'description')
              )
 
-    return table
+    return table.sort('datetime')
 
 
 def SplitTables(table: Table) -> Tuple[Table, Table]:
@@ -231,6 +230,59 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
     return norm_trades_table, other_table
 
 
+def AddOrderTotals(table: Table) -> Table:
+    """Add totals per order."""
+
+    credits_map = {rec.order_id: rec.value
+                   for rec in (table
+                               .aggregate('order_id', sum, 'cost')
+                               .records())}
+
+    def AddCredit(prv, cur, nxt) -> Decimal:
+        if nxt is None or nxt.order_id != cur.order_id:
+            return credits_map.get(cur.order_id, None)
+        return ''
+
+    def AddBalance(prv, cur, nxt) -> Decimal:
+        return (ZERO if prv is None else prv._balance) + cur.cost
+
+    def CleanBalance(prv, cur, nxt) -> Decimal:
+        return (cur._balance
+                if nxt is None or nxt.order_id != cur.order_id
+                else '')
+
+    return (table
+            .addfieldusingcontext('credit', AddCredit)
+            .addfieldusingcontext('_balance', AddBalance)
+            .addfieldusingcontext('balance', CleanBalance)
+            .cutout('_balance'))
+
+
+def CalculatePositionCost(table: Table) -> Decimal:
+    """Calculate the original cost to acquire an active position."""
+
+    invs = collections.defaultdict(match.FifoInventory)
+    for rec in table.records():
+        instrument_key = (rec.underlying, rec.expiration, rec.expcode, rec.side, rec.strike)
+        inv = invs[instrument_key]
+        sign = 1 if rec.instruction == 'BUY' else -1
+        inv.match(sign * rec.quantity, rec.cost / rec.quantity, rec.match_id)
+        #print("    ", rec)
+
+    #print()
+    active = False
+    total_basis = ZERO
+    for key, inv in invs.items():
+        position, basis, match_id = inv.position()
+        total_basis += basis
+        if position:
+            print(key, position, basis, match_id)
+            active = True
+    if active:
+        print('DONE', total_basis)
+        print()
+
+
 @click.command()
 @click.argument('filename', type=click.Path(resolve_path=True, exists=True))
 def main(filename: str):
@@ -238,8 +290,38 @@ def main(filename: str):
     trades_table, _ = GetTransactions(filename)
     from beanbuff.data import match
     trades_table = match.Match(trades_table)
-    if 1:
+    from beanbuff.data import chains
+    trades_table = chains.Group(trades_table)
+    if 0:
         print(trades_table.lookallstr())
+
+
+    # Group by chain and render.
+    chain_map = trades_table.recordlookup('chain_id')
+    for chain_id, rows in chain_map.items():
+        rows = list(rows)
+        chain_table = AddOrderTotals(WrapRecords(list(rows)))
+
+        print("* {}.{:%y%m%d}-{:%y%m%d} ({})".format(
+            rows[0].underlying,
+            rows[0].datetime,
+            rows[-1].datetime,
+            chain_id))
+
+        print(chain_table.lookallstr())
+        CalculatePositionCost(chain_table)
+
+        continue
+
+        last_order_id = None
+        cost = ZERO
+        for row in rows:
+            if row.order_id != last_order_id:
+                print()
+                last_order_id = row.order_id
+            print("    {}".format(row.description))
+        print()
+        print()
 
 
 if __name__ == '__main__':
