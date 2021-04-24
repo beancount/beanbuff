@@ -236,6 +236,8 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
 def main(filename: str):
     """Main program."""
     trades_table, _ = GetTransactions(filename)
+    from beanbuff.data import match
+    trades_table = match.Match(trades_table)
     if 1:
         print(trades_table.lookallstr())
 

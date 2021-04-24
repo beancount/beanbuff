@@ -1,5 +1,4 @@
-"""Module to pair up opening and closing transactions, and transactions
-connectedd by order ids or overlapping time.
+"""Module to compute chains of related transactions over time.
 
 Transactions are grouped together if
 
