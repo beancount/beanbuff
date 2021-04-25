@@ -3,8 +3,10 @@
 
 __author__ = 'Martin Blais <blais@furius.ca>'
 
+import datetime
 from pprint import pprint
 import collections
+import itertools
 import hashlib
 from decimal import Decimal
 from typing import Dict, Tuple, NamedTuple, Optional
@@ -13,6 +15,17 @@ from beanbuff.data.etl import petl, Table, Record
 
 
 ZERO = Decimal(0)
+
+
+class InstKey(NamedTuple):
+    account: str
+    instype: str
+    underlying: str
+    expiration: datetime.date
+    expcode: Optional[str]
+    side: str
+    strike: Decimal
+    multiplier: Decimal
 
 
 def Match(transactions: Table) -> Dict[str, str]:
@@ -24,26 +37,48 @@ def Match(transactions: Table) -> Dict[str, str]:
     unique identifier across runs.
     """
     # Create a mapping of transaction ids to matches.
-    invs = collections.defaultdict(NanoInventory)
+    invs = collections.defaultdict(FifoInventory)
     match_map = {}
     for rec in transactions.records():
-        instrument_key = (rec.underlying, rec.expiration, rec.expcode, rec.side, rec.strike)
+        instrument_key = InstKey(
+            rec.account,
+            rec.instype, rec.underlying, rec.expiration, rec.expcode, rec.side,
+            rec.strike, rec.multiplier)
         inv = invs[instrument_key]
         sign = (1 if rec.instruction == 'BUY' else -1)
-        _, match_id = inv.match(sign * rec.quantity, rec.transaction_id)
-        match_map[rec.transaction_id] = match_id
+        basis = rec.multiplier * rec.price
+        _, __, match_id = inv.match(sign * rec.quantity, basis, rec.transaction_id)
+        if match_id:
+            match_map[rec.transaction_id] = match_id
 
-    if 0:
-        # Insert Mark rows to close out the positions virtually.
-        for instrument_key, inv in invs.items():
-            underlying, expiration, expcode, side, strike = instrument_key
-            if inv.quantity != ZERO:
-                _, match_id = inv.match(-inv.quantity, '/mark/')
-                print(instrument_key, inv.quantity)
+    # Insert Mark rows to close out the positions virtually.
+    closing_transactions = [
+        ('account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
+         'instype', 'underlying', 'expiration', 'expcode', 'side', 'strike', 'multiplier',
+         'effect', 'instruction', 'quantity', 'cost')
+    ]
+    idgen = iter(itertools.count(start=1))
+    dt_mark = datetime.datetime.now()
+    for key, inv in invs.items():
+        quantity, basis, match_id = inv.position()
+        if quantity != ZERO:
+            (account, instype, underlying, expiration, expcode, side,
+             strike, multiplier) = instrument_key
+            mark_id = next(idgen)
+            transaction_id = "^mark{:06d}".format(mark_id)
+            order_id = "o{:06d}".format(mark_id)
+            instruction = 'BUY' if quantity < ZERO else 'SELL'
+            sign = -1 if quantity < ZERO else 1
+            closing_transactions.append(
+                (key.account, transaction_id, 'Mark', dt_mark, order_id,
+                 key.instype, key.underlying, key.expiration, key.expcode, key.side,
+                 key.strike, key.multiplier,
+                 'CLOSING', instruction, abs(quantity), sign * basis))
+            match_map[transaction_id] = match_id
 
     # Apply the mapping to the table.
     matched_transactions = (
-        transactions
+        petl.cat(transactions, petl.wrap(closing_transactions))
         .addfield('match_id', lambda r: match_map[r.transaction_id]))
 
     return matched_transactions

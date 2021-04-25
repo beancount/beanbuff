@@ -9,7 +9,7 @@ non-transaction log.
 import collections
 from decimal import Decimal
 from os import path
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 import datetime
 import hashlib
 import logging
@@ -26,6 +26,8 @@ from beanbuff.tastyworks import tastysyms
 
 debug = False
 ZERO = Decimal(0)
+Q1 = Decimal('1')
+Q = Decimal('0.01')
 
 
 def ToDecimal(value: str):
@@ -258,29 +260,42 @@ def AddOrderTotals(table: Table) -> Table:
             .cutout('_balance'))
 
 
-def CalculatePositionCost(table: Table) -> Decimal:
+def GetChainAmounts(table: Table) -> Decimal:
     """Calculate the original cost to acquire an active position."""
 
-    invs = collections.defaultdict(match.FifoInventory)
-    for rec in table.records():
-        instrument_key = (rec.underlying, rec.expiration, rec.expcode, rec.side, rec.strike)
-        inv = invs[instrument_key]
-        sign = 1 if rec.instruction == 'BUY' else -1
-        inv.match(sign * rec.quantity, rec.cost / rec.quantity, rec.match_id)
-        #print("    ", rec)
+    # We just sum up the MTM rows, which should still be at basis.
+    trade_table, mark_table = table.biselect(lambda r: r.rowtype == 'Trade')
 
-    #print()
-    active = False
-    total_basis = ZERO
-    for key, inv in invs.items():
-        position, basis, match_id = inv.position()
-        total_basis += basis
-        if position:
-            print(key, position, basis, match_id)
-            active = True
-    if active:
-        print('DONE', total_basis)
-        print()
+    active = mark_table.nrows() != 0
+    basis = sum(mark_table.values('cost'))
+    accr_cr = sum(trade_table.values('cost'))
+    init_cr = next(iter(trade_table
+                             .aggregate('order_id', sum, 'cost')
+                             .head(1)
+                             .values('value')))
+
+    return active, basis, init_cr, accr_cr
+
+
+win_frac = Decimal('0.50')
+p50 = Decimal('0.80')
+
+
+def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
+    """Calculate all the thresholds for exit."""
+
+    init_win = init_cr * win_frac
+    init_lose = -(init_win * p50 / (1 - p50)).quantize(Q)
+    init_netliq_win = basis + init_win
+    init_netliq_lose = basis + init_lose
+
+    accr_win = accr_cr * win_frac
+    accr_lose = -(accr_win * p50 / (1 - p50)).quantize(Q)
+    accr_netliq_win = basis + accr_win
+    accr_netliq_lose = basis + accr_lose
+
+    return ((init_cr, init_win, init_lose, init_netliq_win, init_netliq_lose),
+            (accr_cr, accr_win, accr_lose, accr_netliq_win, accr_netliq_lose))
 
 
 @click.command()
@@ -295,33 +310,65 @@ def main(filename: str):
     if 0:
         print(trades_table.lookallstr())
 
-
     # Group by chain and render.
     chain_map = trades_table.recordlookup('chain_id')
+    prefix_header = ('trade', 'underlying', 'cost', 'active')
+    init_header = ('cr', 'win', 'lose', 'netliq_win', 'netliq_lose')
+    accr_header = tuple('accr_' + x for x in init_header)
+    header = prefix_header + init_header + accr_header
+    chains_rows = [header]
     for chain_id, rows in chain_map.items():
         rows = list(rows)
-        chain_table = AddOrderTotals(WrapRecords(list(rows)))
+        chain_table = AddOrderTotals(WrapRecords(rows))
+        active, basis, init_cr, accr_cr = GetChainAmounts(chain_table)
 
-        print("* {}.{:%y%m%d}-{:%y%m%d} ({})".format(
-            rows[0].underlying,
+        underlying = rows[0].underlying
+        trade = "{}.{:%y%m%d}-{}".format(
+            underlying,
             rows[0].datetime,
-            rows[-1].datetime,
-            chain_id))
+            "{:%y%m%d}".format(rows[-1].datetime) if not active else 'now')
+        print("* {} ({})".format(trade, chain_id))
+
+        # Compute cost rows; fraction of the credit for taking off winners.
+        init_costs, accr_costs = CalculateExitRow(basis, init_cr, accr_cr)
+        row = (trade, underlying, -basis, active) + init_costs + accr_costs
+        chains_rows.append(row)
 
         print(chain_table.lookallstr())
-        CalculatePositionCost(chain_table)
+        print(petl.wrap([header, row]).lookallstr())
 
-        continue
+    # Keep only the active position and folder the cost rows on top of each
+    # other.
+    fold_rows = [('trade', 'underlying', 'cost', 'crtype') + init_header]
+    active_table = (petl.wrap(chains_rows)
+                    .selecttrue('active')
+                    .cutout('active')
+                    .sort('trade'))
+    for r in active_table.records():
+        rt = list(r)
+        init_costs = rt[3:8]
+        accr_costs = rt[8:13]
+        fold_rows.append([r.trade, r.underlying, r.cost, 'init'] + init_costs)
+        fold_rows.append(['', '', '', 'accr'] + accr_costs)
+    print(petl.wrap(fold_rows)
+          .convert(('cr', 'win', 'lose', 'netliq_win', 'netliq_lose'),
+                   lambda v: v.quantize(Q))
+          .lookallstr())
 
-        last_order_id = None
-        cost = ZERO
-        for row in rows:
-            if row.order_id != last_order_id:
-                print()
-                last_order_id = row.order_id
-            print("    {}".format(row.description))
-        print()
-        print()
+    # Render the trade to something nicely readable.
+    #
+    # last_order_id = None
+    # cost = ZERO
+    # for row in rows:
+    #     if row.order_id != last_order_id:
+    #         print()
+    #         last_order_id = row.order_id
+    #     print("    {}".format(row.description))
+    # print()
+    # print()
+
+
+
 
 
 if __name__ == '__main__':

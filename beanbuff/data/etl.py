@@ -5,7 +5,6 @@ from decimal import Decimal
 from typing import List
 
 import petl
-
 petl.config.look_style = 'minimal'
 petl.compat.numeric_types = petl.compat.numeric_types + (Decimal,)
 petl.config.failonerror = True
