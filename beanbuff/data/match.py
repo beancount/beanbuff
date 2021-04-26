@@ -23,7 +23,7 @@ class InstKey(NamedTuple):
     underlying: str
     expiration: datetime.date
     expcode: Optional[str]
-    side: str
+    putcall: str
     strike: Decimal
     multiplier: Decimal
 
@@ -42,7 +42,7 @@ def Match(transactions: Table) -> Dict[str, str]:
     for rec in transactions.records():
         instrument_key = InstKey(
             rec.account,
-            rec.instype, rec.underlying, rec.expiration, rec.expcode, rec.side,
+            rec.instype, rec.underlying, rec.expiration, rec.expcode, rec.putcall,
             rec.strike, rec.multiplier)
         inv = invs[instrument_key]
         sign = (1 if rec.instruction == 'BUY' else -1)
@@ -54,7 +54,7 @@ def Match(transactions: Table) -> Dict[str, str]:
     # Insert Mark rows to close out the positions virtually.
     closing_transactions = [
         ('account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
-         'instype', 'underlying', 'expiration', 'expcode', 'side', 'strike', 'multiplier',
+         'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
          'effect', 'instruction', 'quantity', 'cost')
     ]
     idgen = iter(itertools.count(start=1))
@@ -62,7 +62,7 @@ def Match(transactions: Table) -> Dict[str, str]:
     for key, inv in invs.items():
         quantity, basis, match_id = inv.position()
         if quantity != ZERO:
-            (account, instype, underlying, expiration, expcode, side,
+            (account, instype, underlying, expiration, expcode, putcall,
              strike, multiplier) = instrument_key
             mark_id = next(idgen)
             transaction_id = "^mark{:06d}".format(mark_id)
@@ -71,7 +71,7 @@ def Match(transactions: Table) -> Dict[str, str]:
             sign = -1 if quantity < ZERO else 1
             closing_transactions.append(
                 (key.account, transaction_id, 'Mark', dt_mark, order_id,
-                 key.instype, key.underlying, key.expiration, key.expcode, key.side,
+                 key.instype, key.underlying, key.expiration, key.expcode, key.putcall,
                  key.strike, key.multiplier,
                  'CLOSING', instruction, abs(quantity), sign * basis))
             match_map[transaction_id] = match_id

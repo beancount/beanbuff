@@ -534,15 +534,18 @@ def ToInstrument(rec: Record) -> str:
 
     elif rec.instype == 'Future Option':
         assert rec.exp.startswith('/')
-        # TODO(blais): Infer the actual expiration date from CME specs.
-        return beansym.Instrument(underlying=underlying[:-3],
+        # TODO(blais): Infer the actual expiration date from CME specs. The
+        # software does not provide it.
+        short_under = underlying[:-3]
+        multiplier = futures.MULTIPLIERS.get(short_under, 1)
+        return beansym.Instrument(underlying=short_under,
                                   calendar=underlying[-3:],
                                   optcontract=rec.exp[1:-3],
                                   optcalendar=rec.exp[-3:],
                                   expiration=None,
                                   strike=Decimal(rec.strike),
                                   putcall=rec.type[0],
-                                  multiplier=futures.OPTION_CONTRACT_SIZE)
+                                  multiplier=multiplier)
 
     else:
         raise ValueError("Could not infer Beansym for {}".format(rec))
