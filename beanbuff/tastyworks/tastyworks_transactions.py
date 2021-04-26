@@ -312,6 +312,20 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
              accr_pnl_win, accr_pnl_flat, accr_pnl_lose))
 
 
+# def RenderTrade(table: Table) -> str:
+#     # Render the trade to something nicely readable.
+#     #
+#     # last_order_id = None
+#     # cost = ZERO
+#     # for row in rows:
+#     #     if row.order_id != last_order_id:
+#     #         print()
+#     #         last_order_id = row.order_id
+#     #     print("    {}".format(row.description))
+#     # print()
+#     # print()
+
+
 @click.command()
 @click.argument('filename', type=click.Path(resolve_path=True, exists=True))
 def main(filename: str):
@@ -378,21 +392,6 @@ def main(filename: str):
                     'pnl_win', 'pnl_flat', 'pnl_lose'),
                    lambda v: v.quantize(Q))
           .lookallstr())
-
-    # Render the trade to something nicely readable.
-    #
-    # last_order_id = None
-    # cost = ZERO
-    # for row in rows:
-    #     if row.order_id != last_order_id:
-    #         print()
-    #         last_order_id = row.order_id
-    #     print("    {}".format(row.description))
-    # print()
-    # print()
-
-
-
 
 
 if __name__ == '__main__':
