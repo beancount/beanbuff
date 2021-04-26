@@ -287,15 +287,29 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
     init_win = init_cr * win_frac
     init_lose = -(init_win * p50 / (1 - p50)).quantize(Q)
     init_netliq_win = basis + init_win
+    init_netliq_flat = basis
     init_netliq_lose = basis + init_lose
+
+    init_pnl_win = accr_cr + init_netliq_win
+    init_pnl_flat = accr_cr + init_netliq_flat
+    init_pnl_lose = accr_cr + init_netliq_lose
 
     accr_win = accr_cr * win_frac
     accr_lose = -(accr_win * p50 / (1 - p50)).quantize(Q)
     accr_netliq_win = basis + accr_win
+    accr_netliq_flat = basis
     accr_netliq_lose = basis + accr_lose
 
-    return ((init_cr, init_win, init_lose, init_netliq_win, init_netliq_lose),
-            (accr_cr, accr_win, accr_lose, accr_netliq_win, accr_netliq_lose))
+    accr_pnl_win = accr_cr + accr_netliq_win
+    accr_pnl_flat = accr_cr + accr_netliq_flat
+    accr_pnl_lose = accr_cr + accr_netliq_lose
+
+    return ((init_cr, init_win, init_lose,
+             init_netliq_win, init_netliq_flat, init_netliq_lose,
+             init_pnl_win, init_pnl_flat, init_pnl_lose),
+            (accr_cr, accr_win, accr_lose,
+             accr_netliq_win, accr_netliq_flat, accr_netliq_lose,
+             accr_pnl_win, accr_pnl_flat, accr_pnl_lose))
 
 
 @click.command()
@@ -303,6 +317,10 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
 def main(filename: str):
     """Main program."""
     trades_table, _ = GetTransactions(filename)
+    if 1:
+        print(trades_table.lookallstr())
+        return
+
     from beanbuff.data import match
     trades_table = match.Match(trades_table)
     from beanbuff.data import chains
@@ -313,7 +331,9 @@ def main(filename: str):
     # Group by chain and render.
     chain_map = trades_table.recordlookup('chain_id')
     prefix_header = ('trade', 'underlying', 'cost', 'active')
-    init_header = ('cr', 'win', 'lose', 'netliq_win', 'netliq_lose')
+    init_header = ('cr', 'target_win', 'target_lose',
+                   'netliq_win', 'netliq_flat', 'netliq_lose',
+                   'pnl_win', 'pnl_flat', 'pnl_lose')
     accr_header = tuple('accr_' + x for x in init_header)
     header = prefix_header + init_header + accr_header
     chains_rows = [header]
@@ -327,15 +347,16 @@ def main(filename: str):
             underlying,
             rows[0].datetime,
             "{:%y%m%d}".format(rows[-1].datetime) if not active else 'now')
-        print("* {} ({})".format(trade, chain_id))
 
         # Compute cost rows; fraction of the credit for taking off winners.
         init_costs, accr_costs = CalculateExitRow(basis, init_cr, accr_cr)
         row = (trade, underlying, -basis, active) + init_costs + accr_costs
         chains_rows.append(row)
 
-        print(chain_table.lookallstr())
-        print(petl.wrap([header, row]).lookallstr())
+        if 0:
+            print("* {} ({})".format(trade, chain_id))
+            print(chain_table.lookallstr())
+            print(petl.wrap([header, row]).lookallstr())
 
     # Keep only the active position and folder the cost rows on top of each
     # other.
@@ -346,12 +367,15 @@ def main(filename: str):
                     .sort('trade'))
     for r in active_table.records():
         rt = list(r)
-        init_costs = rt[3:8]
-        accr_costs = rt[8:13]
+        init_costs = rt[3:12]
+        accr_costs = rt[12:21]
         fold_rows.append([r.trade, r.underlying, r.cost, 'init'] + init_costs)
         fold_rows.append(['', '', '', 'accr'] + accr_costs)
+        fold_rows.append([])
     print(petl.wrap(fold_rows)
-          .convert(('cr', 'win', 'lose', 'netliq_win', 'netliq_lose'),
+          .convert(('cr', 'target_win', 'target_lose',
+                    'netliq_win', 'netliq_flat', 'netliq_lose',
+                    'pnl_win', 'pnl_flat', 'pnl_lose'),
                    lambda v: v.quantize(Q))
           .lookallstr())
 
