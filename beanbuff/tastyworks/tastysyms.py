@@ -40,7 +40,7 @@ def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
     return beansym.Instrument(
         underlying=symbol[0:6].rstrip(),
         expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
-        side=symbol[12],
+        putcall=symbol[12],
         strike=Decimal(symbol[13:21]) / _STRIKE_PRICE_DIVISOR,
         multiplier=futures.OPTION_CONTRACT_SIZE)
 
@@ -72,11 +72,11 @@ def _ParseFuturesOptionSymbol(symbol: str) -> beansym.Instrument:
 
     expistr = match.group(5)
     expiration = datetime.date(int(expistr[0:2]), int(expistr[2:4]), int(expistr[4:6]))
-    side = match.group(6)
+    putcall = match.group(6)
     strike = Decimal(match.group(7))
 
     return inst._replace(optcontract=optcontract,
                          optcalendar=optcalendar,
                          expiration=expiration,
-                         side=side,
+                         putcall=putcall,
                          strike=strike)

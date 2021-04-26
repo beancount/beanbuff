@@ -1,4 +1,4 @@
-"""Parse and normalize Tastyworks transactions history CSV file.
+"""Tastyworks - Parse transactions history CSV file.
 
 Click on "History" >> "Transactions" >> [period] >> [CSV]
 
@@ -172,7 +172,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              .rename('Order #', 'order_id')
              .rename('Instrument Type', 'instype')
              .rename('Description', 'description')
-             .rename('Call or Put', 'side')
+             .rename('Call or Put', 'putcall')
              .rename('Quantity', 'quantity')
              .rename('Value', 'cost')
              .rename('Commissions', 'commissions')
@@ -197,7 +197,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              # See transactions.md.
              .cut('account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
                   'instype', 'underlying', 'expiration', 'expcode',
-                  'side', 'strike', 'multiplier',
+                  'putcall', 'strike', 'multiplier',
                   'effect', 'instruction', 'quantity', 'price',
                   'cost', 'commissions', 'fees',
                   'description')
@@ -392,6 +392,10 @@ def main(filename: str):
                     'pnl_win', 'pnl_flat', 'pnl_lose'),
                    lambda v: v.quantize(Q))
           .lookallstr())
+
+
+# TODO(blais): Add account (for consolidated view).
+# TODO(blais): Add days since trade started.
 
 
 if __name__ == '__main__':

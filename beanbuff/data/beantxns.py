@@ -2,10 +2,10 @@
 
 from typing import List, NamedTuple
 
-from beanbuff.data.rowtxns import Txn
-
 from beancount.core import data
 from beancount.core.account import Account
+
+from beanbuff.data.etl import Record
 
 
 class Config(NamedTuple):
@@ -27,7 +27,7 @@ class Config(NamedTuple):
     order_id: str
 
 
-def CreateTransactions(txns: List[Txn], config: Config) -> data.Entries:
+def CreateTransactions(txns: List[Record], config: Config) -> data.Entries:
     """Convert a list of Txn objects to Beancount Transaction."""
 
     for txn in txns:

@@ -33,7 +33,7 @@ class Instrument(NamedTuple):
     strike: Optional[Decimal] = None
 
     # For options, the side is represented by the letter 'C' or 'P'.
-    side: Optional[str] = None
+    putcall: Optional[str] = None
 
     # For futures and options on futures contracts, the multiplier for the
     # instrument.
@@ -71,13 +71,13 @@ def ToString(inst: Instrument) -> str:
             return "{}{}_{}{}_{:%y%m%d}_{}{}".format(
                 inst.underlying, inst.calendar,
                 inst.optcontract, inst.optcalendar,
-                inst.expiration, inst.side, inst.strike)
+                inst.expiration, inst.putcall, inst.strike)
         else:
             # Without date
             return "{}{}_{}{}_{}{}".format(
                 inst.underlying, inst.calendar,
                 inst.optcontract, inst.optcalendar,
-                inst.side, inst.strike)
+                inst.putcall, inst.strike)
 
     elif inst.calendar:
         # Future
@@ -87,7 +87,7 @@ def ToString(inst: Instrument) -> str:
         # Equity option
         if inst.expiration is not None:
             return "{}_{:%y%m%d}_{}{}".format(
-                inst.underlying, inst.expiration, inst.side, inst.strike)
+                inst.underlying, inst.expiration, inst.putcall, inst.strike)
         else:
             return inst.underlying
 
