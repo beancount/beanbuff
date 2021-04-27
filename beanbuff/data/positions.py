@@ -24,7 +24,6 @@ from dateutil import parser
 
 from beanbuff.data import chains
 from beanbuff.data import match
-from beanbuff.data import match
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 
 from beanbuff.tastyworks import tastyworks_transactions

@@ -214,12 +214,14 @@ def Report(atable: Table, totals: Table,
 
 
 @click.command()
-@click.argument('positions_csv')
+@click.argument('positions_csv', type=click.Path(resolve_path=True, exists=True))
 @click.option('--reference', '-r', type=Decimal, default=None,
               help="Price of the beta-weighted reference applied to the downloaded file.")
 @click.option('--notional', '-x', is_flag=True,
               help="Estimate notional exposure for each position.")
 def main(positions_csv: str, reference: Decimal, notional: bool):
+    """Main program."""
+
     # If the reference isn't given, attempt to get tit from
     if reference is None:
         try:
