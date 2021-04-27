@@ -189,7 +189,8 @@ def FindAndReadInputFiles(filenames: List[str], debug: bool=False) -> Optional[T
         if path.isdir(filename):
             for module in _MODULES:
                 latest = module.FindLatestTransactionsFile(filename)
-                found_list.append((latest, module))
+                if latest:
+                    found_list.append((latest, module))
         else:
             for module in _MODULES:
                 if module.IsTransactionsFile(filename):
