@@ -90,7 +90,7 @@ def SplitGroups(table: Table) -> List[Group]:
 
 def ParseNumber(string: str) -> Decimal:
     """Parse a single number string."""
-    if string == 'N/A (Split Position)':
+    if string in {'N/A', 'N/A (Split Position)'}:
         return Decimal('0')
     sign = 1
     match = re.match(r"\((.*)\)", string)
@@ -244,7 +244,7 @@ def main(positions_csv: str, reference: Decimal, notional: bool):
         # for row in atable.records():
         #     print(row)
 
-    # TODO(blais): Compute beta-weighted adjusted values yourself.
+    # TODO(blais): Compute beta-weighted adjusted values yourself (for better betas).
     # TODO(blais): Add % BP per trade, should be 3-5%.
     # TODO(blais): Render total % BP used and available, should be 35%.
     # TODO(blais): Compute notional equivalent exposure.

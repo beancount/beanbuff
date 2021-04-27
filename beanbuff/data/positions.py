@@ -239,6 +239,17 @@ def main(filenames: List[str], verbose: bool, no_equity=True):
     if 0:
         print(trades_table.lookallstr())
 
+    # Render and format.
+    final_table = RenderTradesTable(trades_table, verbose)
+    _ = (final_table
+         .replaceall(None, '')
+         .tohtml("/home/blais/positions.html"))
+    print(final_table.lookallstr())
+
+
+def RenderTradesTable(trades_table: Table, verbose: bool) -> Table:
+    """Format and render the trades table iin a readable way."""
+
     # Group by chain and render.
     chain_map = trades_table.recordlookup('chain_id')
     prefix_header = ('account', 'underlying', 'trade', 'cost', 'active')
@@ -297,10 +308,7 @@ def main(filenames: List[str], verbose: bool, no_equity=True):
                              'pnl_win', 'pnl_flat', 'pnl_lose'),
                             lambda v: v.quantize(Q) if isinstance(v, Decimal) else v))
 
-    _ = (final_table
-         .replaceall(None, '')
-         .tohtml("/home/blais/positions.html"))
-    print(final_table.lookallstr())
+    return final_table
 
 
 # TODO(blais): Remove orders from previous file.
