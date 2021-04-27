@@ -16,6 +16,7 @@ import hashlib
 import logging
 import pprint
 import re
+import os
 
 import click
 from dateutil import parser
@@ -33,7 +34,6 @@ from beanbuff.ameritrade import thinkorswim_transactions
 ZERO = Decimal(0)
 Q1 = Decimal('1')
 Q = Decimal('0.01')
-
 
 
 def AddOrderTotals(table: Table) -> Table:
@@ -139,7 +139,7 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
 
 
 # def RenderTrade(table: Table) -> str:
-#     # Render the trade to something nicely readable.
+#     # Render a trade to something nicely readable.
 #     #
 #     # last_order_id = None
 #     # cost = ZERO
@@ -151,37 +151,64 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
 #     # print()
 #     # print()
 
-def GuessFileSource(filename: str) -> Tuple[str, types.ModuleType]:
-    """Guess the source of the given filename."""
-    with open(filename) as infile:
-        line = infile.readline()
-        if re.match(r'Date,Type,Action,Symbol', line):
-            return 'tastyworks', tastyworks_transactions
-        elif re.match('\ufeffAccount Statement for', line):
-            if re.search(r'Account Order History filtered by', infile.read()):
-                raise ValueError("ThinkOrSwim account statement is filtered: '{}'. "
-                                 "Remove filter and start over.".format(filename))
-            else:
-                return 'thinkorswim', thinkorswim_transactions
-        else:
-            raise ValueError(
-                "Could not figure out the source of file: '{}'".format(filename))
+# def GuessFileSource(filename: str) -> Tuple[str, types.ModuleType]:
+#     """Guess the source of the given filename."""
+#     with open(filename) as infile:
+#         line = infile.readline()
+#         if re.match(r'Date,Type,Action,Symbol', line):
+#             return 'tastyworks', tastyworks_transactions
+#         elif re.match('\ufeffAccount Statement for', line):
+#             if re.search(r'Account Order History filtered by', infile.read()):
+#                 raise ValueError("ThinkOrSwim account statement is filtered: '{}'. "
+#                                  "Remove filter and start over.".format(filename))
+#             else:
+#                 return 'thinkorswim', thinkorswim_transactions
+#         else:
+#             raise ValueError(
+#                 "Could not figure out the source of file: '{}'".format(filename))
 
 
-def ReadInputFiles(filenames: List[str]) -> Table:
-    """Read in the data files."""
+
+# Available modules to import transactions from.
+_MODULES = [
+    tastyworks_transactions,
+    thinkorswim_transactions,
+]
+
+
+def FindAndReadInputFiles(filenames: List[str], debug: bool=False) -> Optional[Table]:
+    """Read in the data files from directory names and filenames."""
+
+    if not filenames:
+        filenames = [os.getcwd()]
+
+    # Find all the files.
     tables = []
     for filename in filenames:
-        source, module = GuessFileSource(filename)
+        found_list = []
+        if path.isdir(filename):
+            for module in _MODULES:
+                latest = module.FindLatestTransactionsFile(filename)
+                found_list.append((latest, module))
+        else:
+            for module in _MODULES:
+                if module.IsTransactionsFile(filename):
+                    found_list.append((filename, module))
+                    break
+        for found, module in found_list:
+            logging.info("Process '%s' with module '%s'", found, module.__name__)
 
-        # TODO(blais): Process 'other' transactions.
-        trades_table, _ = module.GetTransactions(filename)
-        trades_table = match.Match(trades_table)
-        trades_table = chains.Group(trades_table)
-        tables.append(trades_table)
+            # TODO(blais): Process 'other' transactions.
+            trades_table, _ = module.GetTransactions(found)
+            trades_table = match.Match(trades_table)
+            trades_table = chains.Group(trades_table)
+            tables.append(trades_table)
+
+    if not tables:
+        return None
 
     table = petl.cat(*tables)
-    if 0:
+    if debug:
         print(table.lookallstr())
     return table
 
@@ -192,9 +219,13 @@ def ReadInputFiles(filenames: List[str]) -> Table:
 @click.option('--no-equity', is_flag=True)
 def main(filenames: List[str], verbose: bool, no_equity=True):
     """Main program."""
+    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
     # Read the input files.
-    trades_table = ReadInputFiles(filenames)
+    trades_table = FindAndReadInputFiles(filenames, debug=0)
+    if not trades_table:
+        logging.fatal("No input files to read from the arguments.")
+        return
 
     # Remove equity if desired.
     #
@@ -283,6 +314,9 @@ def main(filenames: List[str], verbose: bool, no_equity=True):
 
 # TODO(blais): Join with the positions table.
 # TODO(blais): Calculate metrics (P/L per day).
+
+# TODO(blais): Add average days in trade; scatter P/L vs. days in analysis.
+
 
 if __name__ == '__main__':
     main()

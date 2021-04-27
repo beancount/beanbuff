@@ -15,6 +15,7 @@ import hashlib
 import logging
 import pprint
 import re
+import os
 
 import click
 from dateutil import parser
@@ -224,6 +225,28 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
     trades_table, other_table = SplitTables(table)
     norm_trades_table = NormalizeTrades(trades_table, GetAccount(filename))
     return norm_trades_table, other_table
+
+
+# Regexp for matching filenames.
+_FILENAME_RE = (r"tastyworks_transactions_(.*)_"
+                r"(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2}).csv")
+
+
+def FindLatestTransactionsFile(dirname: str) -> Optional[str]:
+    """Find the latest transactions file in the directory."""
+    found_pairs = []
+    for fn in os.listdir(dirname):
+        match = re.match(_FILENAME_RE, fn)
+        if match:
+            date1_str = match.group(2)
+            date2_str = match.group(3)
+            found_pairs.append((date2_str, date1_str, path.join(dirname, fn)))
+    return sorted(found_pairs)[-1][2] if found_pairs else None
+
+
+def IsTransactionsFile(filename: str) -> bool:
+    """Return true if this file is a matching transactions file."""
+    return bool(re.match(_FILENAME_RE, path.basename(filename)))
 
 
 @click.command()
