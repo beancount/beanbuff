@@ -564,16 +564,17 @@ def RemoveDashEmpty(value: str) -> str:
 
 def ToDecimal(value: str, row=None) -> Union[Decimal, str]:
     # Decimalize bond prices.
-    if re.search(r"''", value):
+    if re.search(r"'{1,2}", value):
+
         if row is None:
             raise ValueError("Contract type is needed to determine fraction.")
-        match = re.match(r"(\d+)''(\d+)", value)
+        match = re.match(r"(\d+)'{1,2}(\d+)", value)
         if not match:
             raise ValueError("Invalid bond price: {}".format(value))
         # For Treasuries, options quote in 64th's while outrights in 32nd's.
         divisor = 32 if row.type == 'FUTURE' else 64
         dec = Decimal(match.group(1)) + Decimal(match.group(2))/divisor
-        #print(value, "->", dec, row.type)
+        #print("DEC", value, "->", dec, row.type)
         return dec
     else:
         # Regular prices.
