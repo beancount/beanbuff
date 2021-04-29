@@ -104,7 +104,11 @@ def ConsolidatePositionStatement(
         table,
         reference: Optional[Decimal] = None,
         debug_tables: bool = False) -> Tuple[Table, Table]:
-    """Consolidate all the subtables in the position statement."""
+    """Consolidate all the subtables in the position statement.
+
+    The `reference` value is used to compute a reference-adjusted notional value
+    based on deltas.
+    """
 
     # Aggregator. Note: You need to have these columns shown in the UI, for all
     # groups.

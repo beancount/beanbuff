@@ -16,14 +16,21 @@ import logging
 import pprint
 import re
 import os
+import sys
 
 import click
 from dateutil import parser
 
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 
+from beanbuff.data import transactions
 from beanbuff.data import positions
-from beanbuff.ameritrade import thinkorswim_positions
+
+
+def SyntherizeSymbol(table: Table) -> Table:
+    """Remove the symbol columns and replace them by a single symbol."""
+
+underlying  expiration  expcode  putcall  strike
 
 
 @click.command()
@@ -32,12 +39,29 @@ from beanbuff.ameritrade import thinkorswim_positions
 def main(transactions_filename: str, positions_filename: str):
     """Main program."""
 
-    if 0:
-        trades_table = positions.FindAndReadInputFiles([transactions_filename], debug=0)
-        print(trades_table.lookallstr())
+    if 1:
+        trades_table = transactions.FindAndReadFiles([transactions_filename], debug=0)
+        active_table = (trades_table
+                        .selecteq('rowtype', 'Mark'))
+
+    if 1:
+        pos_table = positions.FindAndReadFiles([positions_filename], debug=0)
+
+    if active_table.nrows() != pos_table.nrows():
+        print(active_table.nrows(), file=sys.stderr)
+        print(pos_table.nrows(), file=sys.stderr)
+        raise ValueError("Tables above differ.")
+
+    print(active_table.lookallstr())
+
+
+
+
 
     # if 1:
-    #     positions_table = positions.FindAndReadInputFiles([transactions_filename], debug=0)
+    #     reference = Decimal('417.52')
+    #     pos_table, totals = positions.ConsolidatePositionStatement(table, reference)
+    #     print(pos_table.lookallstr())
 
 
 

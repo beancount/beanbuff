@@ -1,9 +1,7 @@
-"""Tastyworks - Parse transactions history CSV file.
-
-Click on "History" >> "Transactions" >> [period] >> [CSV]
+"""Parse transactions history files.
 
 This produces a standardized transactions history log and a separate
-non-transaction log.
+non-transaction log. See bottom for public entry points.
 """
 
 import collections
@@ -137,37 +135,6 @@ def CalculateExitRow(basis: Decimal, init_cr: Decimal, accr_cr: Decimal) -> Any:
              accr_pnl_win, accr_pnl_flat, accr_pnl_lose))
 
 
-# def RenderTrade(table: Table) -> str:
-#     # Render a trade to something nicely readable.
-#     #
-#     # last_order_id = None
-#     # cost = ZERO
-#     # for row in rows:
-#     #     if row.order_id != last_order_id:
-#     #         print()
-#     #         last_order_id = row.order_id
-#     #     print("    {}".format(row.description))
-#     # print()
-#     # print()
-
-# def GuessFileSource(filename: str) -> Tuple[str, types.ModuleType]:
-#     """Guess the source of the given filename."""
-#     with open(filename) as infile:
-#         line = infile.readline()
-#         if re.match(r'Date,Type,Action,Symbol', line):
-#             return 'tastyworks', tastyworks_transactions
-#         elif re.match('\ufeffAccount Statement for', line):
-#             if re.search(r'Account Order History filtered by', infile.read()):
-#                 raise ValueError("ThinkOrSwim account statement is filtered: '{}'. "
-#                                  "Remove filter and start over.".format(filename))
-#             else:
-#                 return 'thinkorswim', thinkorswim_transactions
-#         else:
-#             raise ValueError(
-#                 "Could not figure out the source of file: '{}'".format(filename))
-
-
-
 # Available modules to import transactions from.
 _MODULES = [
     tastyworks_transactions,
@@ -175,7 +142,7 @@ _MODULES = [
 ]
 
 
-def FindAndReadInputFiles(filenames: List[str], debug: bool=False) -> Optional[Table]:
+def FindAndReadFiles(filenames: List[str], debug: bool=False) -> Optional[Table]:
     """Read in the data files from directory names and filenames."""
 
     if not filenames:
@@ -211,39 +178,6 @@ def FindAndReadInputFiles(filenames: List[str], debug: bool=False) -> Optional[T
     if debug:
         print(table.lookallstr())
     return table
-
-
-@click.command()
-@click.argument('filenames', nargs=-1, type=click.Path(resolve_path=True, exists=True))
-@click.option('-v', '--verbose', is_flag=True)
-@click.option('--no-equity', is_flag=True)
-def main(filenames: List[str], verbose: bool, no_equity=True):
-    """Main program."""
-    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
-
-    # Read the input files.
-    trades_table = FindAndReadInputFiles(filenames, debug=0)
-    if not trades_table:
-        logging.fatal("No input files to read from the arguments.")
-        return
-
-    # Remove equity if desired.
-    #
-    # TODO(blais): Handle this by subtracting existing transactions from the
-    # Ledger instead.
-    if no_equity:
-        trades_table = (trades_table
-                        .select(lambda r: r.instype != 'Equity'))
-
-    if 0:
-        print(trades_table.lookallstr())
-
-    # Render and format.
-    final_table = RenderTradesTable(trades_table, verbose)
-    _ = (final_table
-         .replaceall(None, '')
-         .tohtml("/home/blais/positions.html"))
-    print(final_table.lookallstr())
 
 
 def RenderTradesTable(trades_table: Table, verbose: bool) -> Table:
@@ -310,6 +244,41 @@ def RenderTradesTable(trades_table: Table, verbose: bool) -> Table:
     return final_table
 
 
+@click.command()
+@click.argument('filenames', nargs=-1, type=click.Path(resolve_path=True, exists=True))
+@click.option('--html', type=click.Path(exists=False))
+@click.option('--verbose', '-v', is_flag=True)
+@click.option('--no-equity', is_flag=True)
+def main(filenames: List[str], html: str, verbose: bool, no_equity: bool=True):
+    """Main program."""
+    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
+
+    # Read the input files.
+    trades_table = FindAndReadFiles(filenames, debug=0)
+    if not trades_table:
+        logging.fatal("No input files to read from the arguments.")
+        return
+
+    # Remove equity if desired.
+    #
+    # TODO(blais): Handle this by subtracting existing transactions from the
+    # Ledger instead.
+    if no_equity:
+        trades_table = (trades_table
+                        .select(lambda r: r.instype != 'Equity'))
+
+    if 0:
+        print(trades_table.lookallstr())
+
+    # Render and format.
+    final_table = RenderTradesTable(trades_table, verbose)
+    if html:
+        _ = (final_table
+             .replaceall(None, '')
+             .tohtml(html))
+    print(final_table.lookallstr())
+
+
 # TODO(blais): Remove orders from previous file.
 # TODO(blais): Put generation time in file.
 
@@ -324,6 +293,20 @@ def RenderTradesTable(trades_table: Table, verbose: bool) -> Table:
 # TODO(blais): Calculate metrics (P/L per day).
 
 # TODO(blais): Add average days in trade; scatter P/L vs. days in analysis.
+
+# TODO(blais): Complete this, for the details page of a vertical.
+# def RenderTrade(table: Table) -> str:
+#     # Render a trade to something nicely readable.
+#     #
+#     # last_order_id = None
+#     # cost = ZERO
+#     # for row in rows:
+#     #     if row.order_id != last_order_id:
+#     #         print()
+#     #         last_order_id = row.order_id
+#     #     print("    {}".format(row.description))
+#     # print()
+#     # print()
 
 
 if __name__ == '__main__':

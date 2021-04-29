@@ -35,6 +35,9 @@ class Instrument(NamedTuple):
     # For options, the side is represented by the letter 'C' or 'P'.
     putcall: Optional[str] = None
 
+
+
+
     # For futures and options on futures contracts, the multiplier for the
     # instrument.
     multiplier: Optional[int] = None

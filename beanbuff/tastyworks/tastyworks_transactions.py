@@ -23,11 +23,7 @@ from dateutil import parser
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.tastyworks import tastysyms
-
-
-def ToDecimal(value: str):
-    """Convert number to decimal."""
-    return Decimal(value.replace(',', '') if value else 0)
+from beanbuff.tastyworks.tastyutils import ToDecimal
 
 
 def GetTransactionId(rec: Record) -> str:

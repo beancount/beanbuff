@@ -64,6 +64,8 @@ def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
 def _ParseFuturesOptionSymbol(symbol: str) -> beansym.Instrument:
     # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
     match = re.match(fr"\.(/[^ ]+) +{_FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
+    if not match:
+        raise ValueError("Could not match future option: {}".format(symbol))
 
     inst = _ParseFuturesSymbol(match.group(1))
     optcontract, optfmonth, optfyear = match.group(2,3,4)

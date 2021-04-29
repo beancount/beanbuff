@@ -566,6 +566,8 @@ def ToDecimal(value: str, row=None) -> Union[Decimal, str]:
     # Decimalize bond prices.
     if re.search(r"'{1,2}", value):
 
+        # TODO(blais): If there's a single ' it's 320ths.
+
         if row is None:
             raise ValueError("Contract type is needed to determine fraction.")
         match = re.match(r"(\d+)'{1,2}(\d+)", value)
