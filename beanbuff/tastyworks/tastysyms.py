@@ -41,8 +41,18 @@ def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
         underlying=symbol[0:6].rstrip(),
         expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
         putcall=symbol[12],
-        strike=Decimal(symbol[13:21]) / _STRIKE_PRICE_DIVISOR,
+        strike=_ParseStrikeAmount(symbol[13:21]),
         multiplier=futures.OPTION_CONTRACT_SIZE)
+
+
+def _ParseStrikeAmount(string: str) -> Decimal:
+    """Parse a thousand multiplicand of a strike price."""
+    value = Decimal(string[:-3])
+    fraction = string[-3:].rstrip('0')
+    if fraction:
+        fraction = Decimal('0.' + fraction)
+        value += fraction
+    return Decimal(value)
 
 
 _FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"

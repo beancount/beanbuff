@@ -7,9 +7,10 @@ non-transaction log.
 """
 
 import collections
+import decimal
 from decimal import Decimal
 from os import path
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import datetime
 import hashlib
 import logging
@@ -99,6 +100,17 @@ def GetPosEffect(rec: Record) -> Optional[str]:
         return ''
 
 
+def ParseStrikePrice(string: str) -> Decimal:
+    """Parse and normalize the strike price."""
+    cstring = re.sub(r"(.*)\.0$", r"\1", string)
+    if not cstring:
+        return Decimal(0)
+    try:
+        return Decimal(cstring)
+    except decimal.InvalidOperation:
+        raise ValueError("Could not parse: {}".format(string))
+
+
 def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
     """Prepare the table for processing."""
 
@@ -116,8 +128,8 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
                        'Quantity',
                        'Multiplier',
                        'Commissions',
-                       'Fees',
-                       'Strike Price'], ToDecimal)
+                       'Fees'], ToDecimal)
+             .convert('Strike Price', ParseStrikePrice)
 
              # Parse the instrument from the original row.
              .addfield('instrument', lambda r: tastysyms.ParseSymbol(
@@ -223,26 +235,15 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
     return norm_trades_table, other_table
 
 
-# Regexp for matching filenames.
-_FILENAME_RE = (r"tastyworks_transactions_(.*)_"
-                r"(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2}).csv")
-
-
-def FindLatestTransactionsFile(dirname: str) -> Optional[str]:
-    """Find the latest transactions file in the directory."""
-    found_pairs = []
-    for fn in os.listdir(dirname):
-        match = re.match(_FILENAME_RE, fn)
-        if match:
-            date1_str = match.group(2)
-            date2_str = match.group(3)
-            found_pairs.append((date2_str, date1_str, path.join(dirname, fn)))
-    return sorted(found_pairs)[-1][2] if found_pairs else None
-
-
-def IsTransactionsFile(filename: str) -> bool:
+def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     """Return true if this file is a matching transactions file."""
-    return bool(re.match(_FILENAME_RE, path.basename(filename)))
+    _FILENAME_RE = (r"tastyworks_transactions_(.*)_"
+                    r"(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2}).csv")
+    match = re.match(_FILENAME_RE, path.basename(filename))
+    if not match:
+        return None
+    account, date1, date2 = match.groups()
+    return account, date2, GetTransactions
 
 
 @click.command()

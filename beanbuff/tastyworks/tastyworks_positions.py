@@ -38,11 +38,13 @@ def ConvertPoP(pop_str: str) -> Decimal:
     """Convert POP to an integer."""
     if pop_str == '< 1%':
         return Decimal(1)
+    elif pop_str == '> 99.5%':
+        return Decimal(99.5)
     else:
         return Decimal(pop_str.rstrip('%'))
 
 
-def GetPositions(filename: str) -> Tuple[Table, Table]:
+def GetPositions(filename: str) -> Table:
     """Process the filename, normalize, and produce tables."""
     table = petl.fromcsv(filename)
     table = (table
@@ -90,7 +92,6 @@ def GetPositions(filename: str) -> Tuple[Table, Table]:
              .rename('P/L Open', 'pnl')
              .rename('P/L Day', 'pnl_day')
 
-
              #.addfield('DELTA_DIFFS', lambda r: r['Delta'] / r['/ Delta'] if r['/ Delta'] else '')
              .cut('account', 'instype', 'symbol',
                   'quantity', 'price', 'mark',
@@ -101,25 +102,14 @@ def GetPositions(filename: str) -> Tuple[Table, Table]:
     return table
 
 
-
-# Regexp for matching filenames.
-_FILENAME_RE = r"tastyworks_positions_(.*)_(\d{4}-\d{2}-\d{2}).csv"
-
-
-def FindLatestPositionsFile(dirname: str) -> Optional[str]:
-    """Find the latest transactions file in the directory."""
-    found_pairs = []
-    for fn in os.listdir(dirname):
-        match = re.match(_FILENAME_RE, fn)
-        if match:
-            date_str = match.group(1)
-            found_pairs.append((date_str, path.join(dirname, fn)))
-    return sorted(found_pairs)[-1][1] if found_pairs else None
-
-
-def IsPositionsFile(filename: str) -> bool:
-    """Return true if this file is a matching transactions file."""
-    return bool(re.match(_FILENAME_RE, path.basename(filename)))
+def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
+    """Return true if this file is a matching positions file."""
+    _FILENAME_RE = r"tastyworks_positions_(.*)_(\d{4}-\d{2}-\d{2}).csv"
+    match = re.match(_FILENAME_RE, path.basename(filename))
+    if not match:
+        return None
+    account, date = match.groups()
+    return account, date, GetPositions
 
 
 @click.command()

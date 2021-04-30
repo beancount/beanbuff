@@ -28,6 +28,7 @@ The output will include:
 - A table with the extrema for each greek or columns.
 """
 
+from os import path
 import argparse
 from decimal import Decimal
 import itertools
@@ -215,6 +216,21 @@ def Report(atable: Table, totals: Table,
         #print(sstable.lookallstr())
     top_table = petl.annex(*top_tables)
     print(top_table.lookallstr())
+
+
+def GetPositions(filename: str) -> Table:
+    return None
+
+
+def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
+    """Return true if this file is a matching transactions file."""
+    _FILENAME_RE = r"(\d{4}-\d{2}-\d{2})-PositionStatement.csv"
+    match = re.match(_FILENAME_RE, path.basename(filename))
+    if not match:
+        return None
+    date = match.group(1)
+    return 'thinkorswim', date, GetPositions
+
 
 
 @click.command()

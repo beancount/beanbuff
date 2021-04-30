@@ -1,8 +1,10 @@
 """Normalized symbols."""
 
 import datetime
+import re
 from decimal import Decimal
 from typing import List, NamedTuple, Optional
+
 
 
 # A representation of an option.
@@ -35,9 +37,6 @@ class Instrument(NamedTuple):
     # For options, the side is represented by the letter 'C' or 'P'.
     putcall: Optional[str] = None
 
-
-
-
     # For futures and options on futures contracts, the multiplier for the
     # instrument.
     multiplier: Optional[int] = None
@@ -56,6 +55,32 @@ class Instrument(NamedTuple):
     def expcode(self) -> str:
         """Return the expiration code."""
         return GetExpirationCode(self)
+
+
+def FromColumns(
+        underlying: str,
+        expiration: datetime.date,
+        expcode: str,
+        putcall: str,
+        strike: Decimal,
+        multiplier: Decimal) -> Instrument:
+    """Build an Instrument from column values."""
+    match = re.match('(/.*)([FGHJKMNQUVXZ]2\d)', underlying)
+    if match:
+        underlying, calendar = match.groups()
+    else:
+        calendar = None
+
+    optcontract, optcalendar = None, None
+    if expcode:
+        match = re.match('(.*)([FGHJKMNQUVXZ]2\d)', expcode)
+        if match:
+            optcontract, optcalendar = match.groups()
+
+    side = putcall[0] if putcall else None
+
+    return Instrument(underlying, calendar, optcontract, optcalendar,
+                      expiration, strike, side, multiplier)
 
 
 def ToString(inst: Instrument) -> str:
@@ -108,3 +133,15 @@ def GetExpirationCode(inst: Instrument) -> str:
         assert inst.optcalendar, inst
         return "{}{}".format(inst.optcontract, inst.optcalendar)
     return ''
+
+
+def GetContractName(symbol: str) -> str:
+    """Return the underlying without the futures calendar expiration from a beamnsym,
+    e.g. '/CL'."""
+    underlying = symbol.split('_')[0]
+    if underlying.startswith('/'):
+        match = re.match('(.*)([FGHJKMNQUVXZ]2\d)', underlying)
+        assert match, string
+        return match.group(1)
+    else:
+        return underlying

@@ -18,51 +18,88 @@ import re
 import os
 import sys
 
+from more_itertools import first
 import click
 from dateutil import parser
 
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 
-from beanbuff.data import transactions
-from beanbuff.data import positions
+from beanbuff.data import transactions as transactions_mod
+from beanbuff.data import positions as positions_mod
+from beanbuff.data import beansym
 
 
-def SyntherizeSymbol(table: Table) -> Table:
+def SynthesizeSymbol(r: Record) -> str:
     """Remove the symbol columns and replace them by a single symbol."""
+    return str(beansym.FromColumns(r.underlying,
+                                   r.expiration,
+                                   r.expcode,
+                                   r.putcall,
+                                   r.strike,
+                                   r.multiplier))
 
-underlying  expiration  expcode  putcall  strike
+
+def DebugPrint(tabledict):
+    for name, table in tabledict.items():
+        with open("/tmp/{}.txt".format(name), "w") as ofile:
+            print(table.sort(), file=ofile)
 
 
 @click.command()
-@click.argument('transactions_filename', type=click.Path(resolve_path=True, exists=True))
-@click.argument('positions_filename', type=click.Path(resolve_path=True, exists=True))
-def main(transactions_filename: str, positions_filename: str):
+@click.argument('fileordirs', nargs=-1, type=click.Path(resolve_path=True, exists=True))
+@click.option('--html', type=click.Path(exists=False))
+def main(fileordirs: str, html: str):
     """Main program."""
+    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
     if 1:
-        trades_table = transactions.FindAndReadFiles([transactions_filename], debug=0)
-        active_table = (trades_table
-                        .selecteq('rowtype', 'Mark'))
+        transactions = transactions_mod.GetTransactions(fileordirs)
+        if not transactions:
+            logging.fatal("No input files to read from the arguments.")
 
     if 1:
-        pos_table = positions.FindAndReadFiles([positions_filename], debug=0)
+        positions = positions_mod.GetPositions(fileordirs)
+        if not positions:
+            logging.fatal("No input files to read from the arguments.")
 
-    if active_table.nrows() != pos_table.nrows():
-        print(active_table.nrows(), file=sys.stderr)
-        print(pos_table.nrows(), file=sys.stderr)
-        raise ValueError("Tables above differ.")
+    # # TODO(blais): Do away with this eventually.
+    # transactions = (transactions
+    #                 .select(lambda r: r.instype != 'Equity'))
 
-    print(active_table.lookallstr())
+    # Keep only the open options positions in the transactions log.
+    transactions = (transactions
+                    .addfield('symbol', SynthesizeSymbol))
+
+    # TODO(blais): Handle multiple accounts in the positions file.
+    # DebugPrint(transactions, positions); return
+
+    # Add column to match only mark rows to position rows.
+    positions = (positions
+                 .addfield('rowtype', 'Mark'))
+
+    # Join positions to transactions.
+    augmented = petl.outerjoin(transactions, positions,
+                               key=['account', 'symbol', 'rowtype'], rprefix='p_')
+    if transactions.nrows() != augmented.nrows():
+        DebugPrint({'txn': transactions, 'pos': positions, 'aug': augmented})
+        raise ValueError("Tables differ. See debug prints in /tmp.")
+
+    # Convert to chains.
+    chains = transactions_mod.TransactionsToChains(augmented)
+    active_chains = (chains
+                     .selecteq('active', True))
+
+    # Clean up the chains and add targets.
+    final_chains = transactions_mod.FormatActiveChains(active_chains)
+    if html:
+        final_chains.tohtml(html)
+    print(final_chains.sort('tgtinit%').lookallstr())
 
 
-
-
-
-    # if 1:
-    #     reference = Decimal('417.52')
-    #     pos_table, totals = positions.ConsolidatePositionStatement(table, reference)
-    #     print(pos_table.lookallstr())
-
+# TODO(blais): Add a separate table to match, which provides an association of
+# - Trade name/code
+# - Comment for entry
+# - Initial POP
 
 
 if __name__ == '__main__':

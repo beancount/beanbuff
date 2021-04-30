@@ -19,7 +19,7 @@ from decimal import Decimal
 from functools import partial
 from itertools import chain
 from os import path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Iterable
 import collections
 import csv
 import datetime
@@ -876,24 +876,14 @@ def PrepareTables(filename: str) -> Dict[str, Table]:
     return prepared_tables
 
 
-# Regexp for matching filenames.
-_FILENAME_RE = r"(\d{4}-\d{2}-\d{2})-AccountStatement.csv"
-
-
-def FindLatestTransactionsFile(dirname: str) -> Optional[str]:
-    """Find the latest transactions file in the directory."""
-    found_pairs = []
-    for fn in os.listdir(dirname):
-        match = re.match(_FILENAME_RE, fn)
-        if match:
-            date_str = match.group(1)
-            found_pairs.append((date_str, path.join(dirname, fn)))
-    return sorted(found_pairs)[-1][1] if found_pairs else None
-
-
-def IsTransactionsFile(filename: str) -> bool:
+def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     """Return true if this file is a matching transactions file."""
-    return bool(re.match(_FILENAME_RE, path.basename(filename)))
+    _FILENAME_RE = r"(\d{4}-\d{2}-\d{2})-AccountStatement.csv"
+    match = re.match(_FILENAME_RE, path.basename(filename))
+    if not match:
+        return None
+    date = match.group(1)
+    return 'thinkorswim', date, GetTransactions
 
 
 @click.command()
