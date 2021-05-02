@@ -83,10 +83,10 @@ def TransactionsToChains(transactions: Table) -> Table:
         'commissions': ('commissions', sum),
         'fees': ('fees', sum),
 
-        'net_liq': ('p_net_liq', OptSum),
-        'pnl_day': ('p_pnl_day', OptSum),
-        # 'pnl': ('p_pnl', OptSum),
-        # 'p_cost': ('p_cost', OptSum),
+        'net_liq': ('net_liq', OptSum),
+        'pnl_day': ('pnl_day', OptSum),
+        # 'pnl': ('pnl_open', OptSum),
+        # 'cost': ('pos_cost', OptSum), # Note: Could validate they match.
     }
     typed_chains = (
         transactions
@@ -162,6 +162,10 @@ def FormatActiveChains(chains: Table) -> Table:
 
     chains = (
         chains
+
+        # Replicate some of the rows for proximity and reading convenience.
+        .addfield('init_cr', lambda r: r.init)
+        .addfield('accr_cr', lambda r: r.accr)
         .addfield('net_liq', lambda r: r.net_liq)
         .cutout('net_liq')
 
@@ -302,30 +306,30 @@ def main(fileordirs: str, html: str, inactive: bool):
 
     # If we have a valid positions file, we join it in.
     # This script should work or without one.
-    if positions:
-        # TODO(blais): Handle multiple accounts in the positions file.
-        # DebugPrint(transactions, positions); return
-
+    if positions.nrows() > 0:
         positions = (positions
-
                      # Add column to match only mark rows to position rows.
                      .addfield('rowtype', 'Mark')
 
                      # Remove particular groups.
                      # TODO(blais): Make this configurable.
-                     .select('group', lambda v: not re.match(r'Core\b.*', v)))
+                     .select('group', lambda v: v is None or not re.match(r'Core\b.*', v)))
 
         # Join positions to transactions.
-        transactions = petl.outerjoin(transactions, positions,
-                                      key=['account', 'rowtype', 'symbol'], rprefix='p_')
-        (transactions
-         .sort('symbol')
-         .select(lambda r: r.rowtype == 'Mark')
-         .tocsv("/tmp/augmented.csv")) ## TODO(blais): Remove
+        transactions = (
+            petl.outerjoin(transactions, positions,
+                           key=['account', 'rowtype', 'symbol'], rprefix='p_')
 
-        # if transactions.nrows() != augmented.nrows():
-        #     DebugPrint({'txn': transactions, 'pos': positions, 'aug': augmented})
-        #     raise ValueError("Tables differ. See debug prints in /tmp.")
+            # Rename some of the added columns.
+            .rename('p_net_liq', 'net_liq')
+            .rename('p_cost', 'pos_cost')
+            .rename('p_pnl_open', 'pnl_open')
+            .rename('p_pnl_day', 'pnl_day'))
+    else:
+        # Add columns that would be necessary from the positions table.
+        transactions = (transactions
+                        .addfield('net_liq', None)
+                        .addfield('pnl_day', None))
 
     # Convert to chains.
     chains = TransactionsToChains(transactions)
@@ -338,11 +342,16 @@ def main(fileordirs: str, html: str, inactive: bool):
     if html:
         ToHtml(final_chains, html)
     print(final_chains.lookallstr())
-    print(final_chains.aggregate(None, {
-        'total_pnl': ('chain_pnl', sum),
+
+    # Render some totals.
+    agg = {
         'commissions': ('commis', sum),
         'fees': ('fees', sum),
-    }).lookallstr())
+    }
+    if 'chain_pnl' in final_chains.fieldnames():
+        agg['total_pnl'] = ('chain_pnl', sum)
+    print(final_chains
+          .aggregate(None, agg).lookallstr())
 
 
 if __name__ == '__main__':

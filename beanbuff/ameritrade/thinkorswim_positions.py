@@ -235,19 +235,18 @@ def FoldInstrument(table: Table) -> Table:
             .rename('Trade Price', 'price')
             .rename('Mark', 'mark')
             .rename('Net Liq', 'net_liq')
-            .rename('P/L Open', 'pnl')
+            .rename('P/L Open', 'pnl_open')
             .rename('P/L Day', 'pnl_day')
 
             # Make up missing 'cost' field.
             # TODO(blais): Remove this from the requirements, it comes from the transactions table.
-            # TODO(blais): Rename 'pnl' to 'pnl_open'.
             .addfield('cost', None)
 
             # Convert numbers.
-            .convert(['price', 'mark', 'net_liq', 'pnl', 'pnl_day'], ToDecimal)
+            .convert(['price', 'mark', 'net_liq', 'pnl_open', 'pnl_day'], ToDecimal)
 
             # Clean up the final table.
-            .cut('symbol', 'quantity', 'price', 'mark', 'cost', 'net_liq', 'pnl', 'pnl_day'))
+            .cut('symbol', 'quantity', 'price', 'mark', 'cost', 'net_liq', 'pnl_open', 'pnl_day'))
 
     return table
 

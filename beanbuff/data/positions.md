@@ -4,8 +4,6 @@
   the brokerage. This can be used if a file contains information about multiple
   accounts.
 
-TODO(blais): Rename 'pnl' to 'pnl_open', it's more clear and in line with platforms.
-
 
 TODO(blais): Do more...
 

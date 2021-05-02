@@ -15,10 +15,12 @@ _SUB_FRACTIONS = {
     '1': Decimal(1)/Decimal(8),
     '2': Decimal(2)/Decimal(8),
     '3': Decimal(3)/Decimal(8),
+    '4': Decimal(3+4)/Decimal(8+8), # Approximation, for calculations.
     '5': Decimal(4)/Decimal(8),
     '6': Decimal(5)/Decimal(8),
     '7': Decimal(6)/Decimal(8),
     '8': Decimal(7)/Decimal(8),
+    '9': Decimal(7+8)/Decimal(8+8), # Approximation, for calculations.
 }
 
 
@@ -26,6 +28,7 @@ def ToDecimal(string: str) -> Decimal:
     """Convert number to Decimal. This also decimalizes bond fractions to decimals"""
 
     # Ignore empty or N/A values.
+    ostring = string
     if string in {"", "--"} or string.startswith("N/A"):
         return Decimal(0)
 
@@ -44,10 +47,13 @@ def ToDecimal(string: str) -> Decimal:
     if match:
         integral, s64th = match.groups()
         if len(s64th) > 3:
-            raise ValueError("Invalid 64ths price: '{}'".format(string))
+            raise ValueError("Invalid 64ths price: '{}'".format(ostring))
         frac64ths = Decimal(s64th[:2])
         if len(s64th) == 3:
-            frac64ths += _SUB_FRACTIONS[s64th[2]]
+            try:
+                frac64ths += _SUB_FRACTIONS[s64th[2]]
+            except KeyError as exc:
+                raise ValueError("Invalid subfraction in '{}'".format(ostring))
         return sign * Decimal(integral) + frac64ths / Decimal(64)
 
     # 32'ths.
@@ -55,10 +61,13 @@ def ToDecimal(string: str) -> Decimal:
     if match:
         integral, s32th = match.groups()
         if len(s32th) > 3:
-            raise ValueError("Invalid 32ths price: '{}'".format(string))
+            raise ValueError("Invalid 32ths price: '{}'".format(ostring))
         frac32ths = Decimal(s32th[:2])
         if len(s32th) == 3:
-            frac32ths += _SUB_FRACTIONS[s32th[2]]
+            try:
+                frac32ths += _SUB_FRACTIONS[s32th[2]]
+            except KeyError as exc:
+                raise ValueError("Invalid subfraction in '{}'".format(ostring))
         return sign * Decimal(integral) + frac32ths / Decimal(32)
 
     # Decimal.

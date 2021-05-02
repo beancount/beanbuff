@@ -89,7 +89,7 @@ def GetPositions(filename: str) -> Table:
              .rename('Cost', 'cost')
              .rename('Mark', 'mark')
              .rename('Net Liq', 'net_liq')
-             .rename('P/L Open', 'pnl')
+             .rename('P/L Open', 'pnl_open')
              .rename('P/L Day', 'pnl_day')
 
              # Add a group field, though there aren't any groupings yet.
@@ -100,7 +100,7 @@ def GetPositions(filename: str) -> Table:
              .cut('account', 'group', 'symbol',
                   'quantity', 'price', 'mark',
                   'cost', 'net_liq',
-                  'pnl', 'pnl_day')
+                  'pnl_open', 'pnl_day')
              )
 
     return table
@@ -121,9 +121,7 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
 def main(filename: str):
     """Main program."""
     table = GetPositions(filename)
-    if 1:
-        print(table.lookallstr())
-        return
+    print(table.lookallstr())
 
 
 # TODO(blais): Render % of targets
