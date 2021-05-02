@@ -1,6 +1,9 @@
 """Load information about futures contracts, in particular, the multipliers.
 """
 
+from typing import Tuple
+
+
 # Standard equity option contract size.
 OPTION_CONTRACT_SIZE = 100
 
@@ -57,3 +60,41 @@ MULTIPLIERS = {
     '/HE'  : 400,
     '/LE'  : 400,
 }
+
+
+# This is a mapping of (option-product-code, month-code) to
+# (futures-product-code, month-code). Options are offered on a monthly basis,
+# but the underlying futures contract isn't necessarily offered for every month
+# (depends on seasonality sometimes), so the underlying is sometimes for the
+# same month (and the options expire a few days ahead of the futures) or for the
+# subsequent month (in which case multiple months are applicable to the same
+# underlying).
+#
+# CME has definitions on this, like this: "/SI: Monthly contracts listed for 3
+# consecutive months and any Jan, Mar, May, and Sep in the nearest 23 months and
+# any Jul and Dec in the nearest 60 months."
+# https://www.cmegroup.com/trading/metals/precious/silver_contractSpecs_options.html
+#
+# We need to eventually encode all those rules as logic, as some input files
+# (notably, from TOS) sometimes only produce the options code and in order to
+# produce a normalized symbol we need both.
+
+# NOTE(blais): Temporary monster hack, based on my own file.
+# Update as needed.
+
+_TEMPORARY_MAPPING = {
+    ('/SO', 'M'): ('/SI', 'N'),
+    ('/OG', 'N'): ('/GC', 'Q'),
+    ('/EUU', 'M'): ('/6E', 'M'),
+    ('/OZC', 'N'): ('/ZC', 'N'),
+    ('/OZS', 'N'): ('/ZS', 'N'),
+}
+
+def GetUnderlyingMonth(optcontract: str, optmonth: str) -> Tuple[str, str]:
+    """Given the contract code and its month (e.g., '/SOM'), return the underlying
+    future and its month ('/SIN'). The reason this function exists is that not
+    all the months are avaiable as underlyings. This depends on the particulars
+    of each futures contract, and the details depend on cyclicality /
+    availability / seasonality of the product.
+    """
+    return _TEMPORARY_MAPPING[(optcontract, optmonth)]

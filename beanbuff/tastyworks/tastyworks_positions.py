@@ -92,8 +92,12 @@ def GetPositions(filename: str) -> Table:
              .rename('P/L Open', 'pnl')
              .rename('P/L Day', 'pnl_day')
 
+             # Add a group field, though there aren't any groupings yet.
+             .addfield('group', None)
+
              #.addfield('DELTA_DIFFS', lambda r: r['Delta'] / r['/ Delta'] if r['/ Delta'] else '')
-             .cut('account', 'instype', 'symbol',
+             # 'instype'
+             .cut('account', 'group', 'symbol',
                   'quantity', 'price', 'mark',
                   'cost', 'net_liq',
                   'pnl', 'pnl_day')

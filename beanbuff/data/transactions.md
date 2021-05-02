@@ -85,7 +85,18 @@ A *normalized* transactions table contains the following columns and types.
 
 
 
-TODO(blais): Write a routine which validates a normalized trade table.
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

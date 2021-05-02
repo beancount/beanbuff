@@ -58,7 +58,7 @@ def Match(transactions: Table) -> Dict[str, str]:
          'effect', 'instruction', 'quantity', 'cost')
     ]
     idgen = iter(itertools.count(start=1))
-    dt_mark = datetime.datetime.now()
+    dt_mark = datetime.datetime.now().replace(microsecond=0)
     for key, inv in invs.items():
         quantity, basis, match_id = inv.position()
         if quantity != ZERO:

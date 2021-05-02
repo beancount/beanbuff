@@ -66,7 +66,7 @@ def InitialCredits(pairs: Iterator[Tuple[str, Decimal]]) -> Decimal:
 
 
 def OptSum(numbers: Iterable[Optional[Decimal]]) -> Decimal:
-    return sum(number for number in numbers if number is not None)
+    return sum((number if isinstance(number, Decimal) else  ZERO) for number in numbers)
 
 
 def TransactionsToChains(transactions: Table) -> Table:
@@ -83,10 +83,10 @@ def TransactionsToChains(transactions: Table) -> Table:
         'commissions': ('commissions', sum),
         'fees': ('fees', sum),
 
-        #'p_cost': ('p_cost', OptSum),
         'net_liq': ('p_net_liq', OptSum),
-        #'pnl': ('p_pnl', OptSum),
         'pnl_day': ('p_pnl_day', OptSum),
+        # 'pnl': ('p_pnl', OptSum),
+        # 'p_cost': ('p_cost', OptSum),
     }
     typed_chains = (
         transactions
@@ -94,7 +94,6 @@ def TransactionsToChains(transactions: Table) -> Table:
         .replace('fees', None, ZERO)
         .aggregate(['chain_id', 'rowtype'], agg)
         .sort('underlying'))
-
 
     # Split historical and active chains aggregate and join them to each other.
     histo, mark = typed_chains.biselect(lambda r: r.rowtype == 'Trade')
@@ -166,7 +165,7 @@ def FormatActiveChains(chains: Table) -> Table:
         .addfield('net_liq', lambda r: r.net_liq)
         .cutout('net_liq')
 
-        .addfield('chain_pnl', lambda r: r.net_liq - r['nl/flat'])
+        .addfield('chain_pnl', lambda r: (r.net_liq or ZERO) - r['nl/flat'])
         .addfield('tgtinit%', PercentTargetInitial)
         .addfield('tgtaccr%', PercentTargetAccrued)
 
@@ -222,8 +221,8 @@ def SynthesizeSymbol(r: Record) -> str:
 
 def DebugPrint(tabledict):
     for name, table in tabledict.items():
-        with open("/tmp/{}.txt".format(name), "w") as ofile:
-            print(table.sort(), file=ofile)
+        filename = "/tmp/{}.csv".format(name)
+        table.sort().tocsv(filename)
 
 
 _TEMPLATE = """
@@ -280,49 +279,62 @@ def ToHtml(table: Table, filename: str):
 @click.command()
 @click.argument('fileordirs', nargs=-1, type=click.Path(resolve_path=True, exists=True))
 @click.option('--html', type=click.Path(exists=False))
-def main(fileordirs: str, html: str):
+@click.option('--inactive', is_flag=True)
+def main(fileordirs: str, html: str, inactive: bool):
     """Main program."""
     logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
-    if 1:
-        transactions = transactions_mod.GetTransactions(fileordirs)
-        if not transactions:
-            logging.fatal("No input files to read from the arguments.")
+    # Read the transactions files.
+    transactions, _ = transactions_mod.GetTransactions(fileordirs)
+    if not transactions:
+        logging.fatal("No input files to read from the arguments.")
 
-    if 1:
-        positions = positions_mod.GetPositions(fileordirs)
-        if not positions:
-            logging.fatal("No input files to read from the arguments.")
+    # Read the positions files.
+    positions, _ = positions_mod.GetPositions(fileordirs)
 
-    # # TODO(blais): Do away with this eventually.
-    # transactions = (transactions
-    #                 .select(lambda r: r.instype != 'Equity'))
+    # TODO(blais): Do away with this eventually.
+    transactions = (transactions
+                    .select(lambda r: r.instype != 'Equity'))
 
     # Keep only the open options positions in the transactions log.
     transactions = (transactions
                     .addfield('symbol', SynthesizeSymbol))
 
-    # TODO(blais): Handle multiple accounts in the positions file.
-    # DebugPrint(transactions, positions); return
+    # If we have a valid positions file, we join it in.
+    # This script should work or without one.
+    if positions:
+        # TODO(blais): Handle multiple accounts in the positions file.
+        # DebugPrint(transactions, positions); return
 
-    # Add column to match only mark rows to position rows.
-    positions = (positions
-                 .addfield('rowtype', 'Mark'))
+        positions = (positions
 
-    # Join positions to transactions.
-    augmented = petl.outerjoin(transactions, positions,
-                               key=['account', 'symbol', 'rowtype'], rprefix='p_')
-    if transactions.nrows() != augmented.nrows():
-        DebugPrint({'txn': transactions, 'pos': positions, 'aug': augmented})
-        raise ValueError("Tables differ. See debug prints in /tmp.")
+                     # Add column to match only mark rows to position rows.
+                     .addfield('rowtype', 'Mark')
+
+                     # Remove particular groups.
+                     # TODO(blais): Make this configurable.
+                     .select('group', lambda v: not re.match(r'Core\b.*', v)))
+
+        # Join positions to transactions.
+        transactions = petl.outerjoin(transactions, positions,
+                                      key=['account', 'rowtype', 'symbol'], rprefix='p_')
+        (transactions
+         .sort('symbol')
+         .select(lambda r: r.rowtype == 'Mark')
+         .tocsv("/tmp/augmented.csv")) ## TODO(blais): Remove
+
+        # if transactions.nrows() != augmented.nrows():
+        #     DebugPrint({'txn': transactions, 'pos': positions, 'aug': augmented})
+        #     raise ValueError("Tables differ. See debug prints in /tmp.")
 
     # Convert to chains.
-    chains = TransactionsToChains(augmented)
-    active_chains = (chains
-                     .selecteq('active', True))
+    chains = TransactionsToChains(transactions)
+    if not inactive:
+        chains = (chains
+                  .selecteq('active', True))
 
     # Clean up the chains and add targets.
-    final_chains = FormatActiveChains(active_chains)
+    final_chains = FormatActiveChains(chains)
     if html:
         ToHtml(final_chains, html)
     print(final_chains.lookallstr())
@@ -331,12 +343,6 @@ def main(fileordirs: str, html: str):
         'commissions': ('commis', sum),
         'fees': ('fees', sum),
     }).lookallstr())
-
-
-# TODO(blais): Add a separate table to match, which provides an association of
-# - Trade name/code
-# - Comment for entry
-# - Initial POP
 
 
 if __name__ == '__main__':

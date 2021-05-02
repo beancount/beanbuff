@@ -60,7 +60,7 @@ _FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
 
 def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
     match = re.match(f"/{_FUTSYM}", symbol)
-    assert match
+    assert match, "Invalid futures options symbol: {}".format(symbol)
     underlying, fmonth, fyear = match.groups()
     underlying = f"/{underlying}"
     decade = datetime.date.today().year % 100 // 10
@@ -73,19 +73,30 @@ def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
 
 def _ParseFuturesOptionSymbol(symbol: str) -> beansym.Instrument:
     # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
-    match = re.match(fr"\.(/[^ ]+) +{_FUTSYM} +(\d{{6}})([CP])([0-9.]+)", symbol)
-    if not match:
-        raise ValueError("Could not match future option: {}".format(symbol))
+    assert symbol.startswith(r"./"), "Invalid futures options symbol: {}".format(symbol)
+    underlying = symbol[1:7].rstrip()
+    contractsym = symbol[7:12].rstrip()
+    assert symbol[12] == ' '
 
-    inst = _ParseFuturesSymbol(match.group(1))
-    optcontract, optfmonth, optfyear = match.group(2,3,4)
+    # Parse the underlying futures contract.
+    inst = _ParseFuturesSymbol(underlying)
+
+    # Parse the corresponding options contract.
+    match = re.match(f"{_FUTSYM}", contractsym)
+    assert match, "Invalid futures options symbol: {}".format(symbol)
+    optcontract, optfmonth, optfyear = match.groups()
     optdecade = datetime.date.today().year % 100 // 10
     optcalendar = f"{optfmonth}{optdecade}{optfyear}"
 
-    expistr = match.group(5)
+    # Parse the option itself.
+    match = re.match(r"(\d{6})([CP])([0-9.]+)", symbol[13:])
+    if not match:
+        raise ValueError("Could not match future option: {}".format(symbol))
+
+    expistr = match.group(1)
     expiration = datetime.date(int(expistr[0:2]), int(expistr[2:4]), int(expistr[4:6]))
-    putcall = match.group(6)
-    strike = Decimal(match.group(7))
+    putcall = match.group(2)
+    strike = Decimal(match.group(3))
 
     return inst._replace(optcontract=optcontract,
                          optcalendar=optcalendar,

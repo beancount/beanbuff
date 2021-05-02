@@ -29,17 +29,22 @@ from beanbuff.tastyworks import tastyworks_transactions
 from beanbuff.ameritrade import thinkorswim_transactions
 
 
-def GetTransactions(fileordirs: List[str]) -> Table:
+def GetTransactions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
     """Find files and parse and concatenate contents."""
 
     matches = discovery.FindFiles(
-        fileordirs,
-        [tastyworks_transactions.MatchFile,
-         thinkorswim_transactions.MatchFile])
+        fileordirs, [
+            tastyworks_transactions.MatchFile,
+            thinkorswim_transactions.MatchFile
+        ])
 
+    filenames = []
     tables = []
     for unused_account, (filename, parser) in sorted(matches.items()):
         transactions, _ = parser(filename)
+        if not transactions:
+            continue
+        filenames.append(filename)
 
         # Note: These need to be processed by file, separately.
         # TODO(blais): Process 'other' transactions.
@@ -47,7 +52,8 @@ def GetTransactions(fileordirs: List[str]) -> Table:
         transactions = chains.Group(transactions)
         tables.append(transactions)
 
-    return petl.cat(*tables)
+    table = petl.cat(*tables) if tables else petl.empty()
+    return table, filenames
 
 
 @click.command()
@@ -60,10 +66,7 @@ def main(fileordirs: List[str], html: str, verbose: bool, no_equity: bool=True):
     logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
     # Read the input files.
-    transactions = GetTransactions(fileordirs)
-    if not transactions:
-        logging.fatal("No input files to read from the arguments.")
-        return
+    transactions, filenames = GetTransactions(fileordirs)
 
     # Remove equity if desired.
     #
@@ -73,40 +76,7 @@ def main(fileordirs: List[str], html: str, verbose: bool, no_equity: bool=True):
         transactions = (transactions
                         .select(lambda r: r.instype != 'Equity'))
 
-    if 0:
-        print(transactions.lookallstr()); raise SystemExit
-
-
-# TODO(blais): Add EXPIRATIONS now!! I get incorrect output for TOS.
-
-# TODO(blais): Remove orders from previous file.
-# TODO(blais): Put generation time in file.
-
-# TODO(blais): Split up chains between expirations?
-
-# TODO(blais): Add the missing expirations!
-# TODO(blais): Render P/L over all trades.
-# TODO(blais): Make it possible to input the P50 on entry, somehow.
-# TODO(blais): Fix futures positions.
-
-# TODO(blais): Join with the positions table.
-# TODO(blais): Calculate metrics (P/L per day).
-
-# TODO(blais): Add average days in trade; scatter P/L vs. days in analysis.
-
-# TODO(blais): Complete this, for the details page of a vertical.
-# def RenderTrade(table: Table) -> str:
-#     # Render a trade to something nicely readable.
-#     #
-#     # last_order_id = None
-#     # cost = ZERO
-#     # for row in rows:
-#     #     if row.order_id != last_order_id:
-#     #         print()
-#     #         last_order_id = row.order_id
-#     #     print("    {}".format(row.description))
-#     # print()
-#     # print()
+    print(transactions.lookallstr())
 
 
 if __name__ == '__main__':

@@ -34,59 +34,27 @@ from decimal import Decimal
 import itertools
 import logging
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, NamedTuple
 
+from dateutil.parser import parse
 import click
 import petl
 petl.config.look_style = 'minimal'
 
+from beanbuff.data import beansym
+from beanbuff.data import futures
+# TODO(blais): Move this to a common location.
+from beanbuff.tastyworks.tastyutils import ToDecimal
+
 
 Table = petl.Table
 Record = petl.Record
-Group = Tuple[str, str, Table]
 Q = Decimal("0.01")
+ZERO = Decimal(0)
 
 
 # The set of fields to produce aggregations over.
 FIELDS = ['Delta', 'Gamma', 'Theta', 'Vega', 'Beta', 'Net Liq', 'P/L Open', 'P/L Day']
-
-
-def SplitGroups(table: Table) -> List[Group]:
-    group_list: List[Group] = []
-    name, subname, group = None, None, []
-    for row in table:
-        # Skip all empty rows.
-        if not row:
-            continue
-
-        # Match group header.
-        if len(row) == 1:
-            # Reset the current group.
-            match = re.fullmatch(r'Group "(.*)"', row[0])
-            if match:
-                if name and subname and group:
-                    group_list.append((name, subname, petl.wrap(group)))
-                name, subname, group = match.group(1), None, []
-                continue
-
-            # Skip useless header.
-            match = re.match(r"(Equities) and Equity Options", row[0])
-            if match:
-                if name and subname and group:
-                    group_list.append((name, subname, petl.wrap(group)))
-                subname, group = match.group(1), []
-                continue
-            match = re.match(r"(Futures) and Futures Options", row[0])
-            if match:
-                if name and subname and group:
-                    group_list.append((name, subname, petl.wrap(group)))
-                subname, group = match.group(1), []
-                continue
-
-        group.append(row)
-    if name and subname and group:
-        group_list.append((name, subname, petl.wrap(group)))
-    return group_list
 
 
 def ParseNumber(string: str) -> Decimal:
@@ -99,6 +67,216 @@ def ParseNumber(string: str) -> Decimal:
         sign = -1
         string = match.group(1)
     return Decimal(string.replace('$', '').replace(',', '')).quantize(Decimal("0.01")) * sign
+
+
+class Group(NamedTuple):
+    """A named table for a subgroup."""
+
+    # Named group.
+    name: str
+
+    # Subgroup within the named group, either 'Equities' or 'Futures'.
+    subname: str
+
+    # The corresponding subtable under them.
+    table: Table
+
+
+def SplitGroups(lines: List[str]) -> List[Group]:
+    """Split the report into named groups."""
+
+    # Clean up the list of lines before processing them.
+    rows = []
+    for line in lines:
+        # Remove initial BOM marker line.
+        if line.startswith('\ufeff'):
+            continue
+        # Remove bottom subtable that contains only summaries.
+        if re.match('Cash & Sweep Vehicle', line):
+            break
+        rows.append(line.rstrip())
+
+    def AddGroup():
+        if name and subname and group:
+            source = petl.MemorySource('\n'.join(group).encode('utf8'))
+            group_list.append(Group(name, subname, petl.fromcsv(source)))
+
+    # Split up the groups into subtables.
+    group_list: List[Group] = []
+    name, subname, group = None, None, []
+    for row in rows:
+        # Skip all empty rows, and reset the group if they occur.
+        if not row:
+            continue
+
+        # Reset the current group.
+        match = re.fullmatch(r'Group "(.*)"', row)
+        if match:
+            AddGroup()
+            name, subname, group = match.group(1), None, []
+            continue
+
+        # Skip useless header.
+        match = re.match(r"(Equities) and Equity Options", row)
+        if match:
+            AddGroup()
+            subname, group = match.group(1), []
+            continue
+        match = re.match(r"(Futures) and Futures Options", row)
+        if match:
+            AddGroup()
+            subname, group = match.group(1), []
+            continue
+
+        group.append(row)
+
+    # Final table.
+    AddGroup()
+
+    return group_list
+
+
+_FUTSYM = "(/[A-Z0-9]+)([FGHJKMNQUVXZ]2[0-9])"
+
+def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
+    """Parse an instrument description to a Beansym."""
+
+    # Handle Future Option, e.g.,
+    # 1/125000 JUN 21 (European) /EUUM21 1.13 PUT
+    match = re.match(r"1/(\d+) ([A-Z]{3}) (2\d)(?: \(([^)]*)\))? "
+                     fr"{_FUTSYM} ([0-9.]+) (PUT|CALL)", string)
+    if match:
+        (multiplier, month, year, subtype,
+         optcontract, optcalendar,
+         strike, putcall) = match.groups()
+        underlying, calendar = futures.GetUnderlyingMonth(optcontract, optcalendar[0])
+        assert underlying == symroot
+        calendar += optcalendar[-2:]
+        return beansym.Instrument(underlying=underlying,
+                                  calendar=calendar,
+                                  optcontract=optcontract[1:],
+                                  optcalendar=optcalendar,
+                                  strike=Decimal(strike),
+                                  putcall=putcall[0],
+                                  multiplier=int(multiplier))
+
+    # Handle Equity Option, e.g.,
+    # 100 (Weeklys) 4 JUN 21 4130 CALL
+    match = re.match(r"100(?: \(([^)]*)\))? (\d+ [A-Z]{3} 2\d) "
+                     r"([0-9.]+) (PUT|CALL)", string)
+    if match:
+        subtype, day_month_year, strike, putcall = match.groups()
+        expiration = parse(day_month_year).date()
+        return beansym.Instrument(underlying=symroot,
+                                  expiration=expiration,
+                                  strike=Decimal(strike),
+                                  putcall=putcall[0],
+                                  multiplier=100)
+
+    # Handle Future, e.g.,
+    # 2-Year U.S. Treasury Note Futures,Jun-2021,ETH (prev. /ZTM1)
+    match = re.fullmatch(r"(.*) \(prev. (/.*)\)", string)
+    if match:
+        symbol = match.group(2)
+        calendar = symbol[-2:-1] + '2' + symbol[-1:]
+        return beansym.Instrument(underlying=symbol[:-2],
+                                  calendar=calendar)
+
+    # Handle Equity, e.g.,
+    # ISHARES TRUST CORE S&P TTL STK ETF
+    # ISHARES TRUST RUS 2000 GRW ETF
+    match = re.fullmatch(r"(.*) ETF( NEW)?", string)
+    if match:
+        return beansym.Instrument(underlying=symroot)
+
+    raise ValueError("Could not parse description: '{}'".format(string))
+
+
+def FoldInstrument(table: Table) -> Table:
+    """Given a group table, remove and fold the underlying row into a replicated
+    column. This function removes redundant grouping rows, folding their unique
+    values as columns.
+    """
+
+    # The table is a two-level table of
+    #
+    # - One row for the underling as a whole. In particular, the 'Instrument'
+    #   column for that row is where the ticker is found.
+    #
+    # - One row for each strategy subgroup. The 'Instrument' column contains the
+    #   strategy for these rows. There is no value in Qty.
+    #
+    # - The remaining rows are actual positions. If positions are all options or
+    #   futures options, there will also be rows dedicated to the corresponding
+    #   underlyings, even if their quantity is zero. Remove those.
+
+    return (table
+
+            # Fold the special underlying row.
+            .addfield('symroot',
+                      lambda r: r['Instrument'] if bool(r['BP Effect']) else None)
+            .filldown('symroot')
+            .selectfalse('BP Effect')
+
+            # Folder the strategy row.
+            .addfield('strategy',
+                      lambda r: r['Instrument'] if not r['Qty'] else None)
+            .filldown('strategy')
+            .selecttrue('Qty')
+            .convert('Qty', Decimal)
+            .selectne('Qty', ZERO)
+            .rename('Qty', 'quantity')
+
+            # Synthetize our symbol.
+            .addfield('symbol',
+                      lambda r: str(ParseInstrumentDescription(r.Instrument, r.symroot)))
+
+            # Normalize names of remaining fields.
+            .rename('Trade Price', 'price')
+            .rename('Mark', 'mark')
+            .rename('Net Liq', 'net_liq')
+            .rename('P/L Open', 'pnl')
+            .rename('P/L Day', 'pnl_day')
+
+            # Make up missing 'cost' field.
+            # TODO(blais): Remove this from the requirements, it comes from the transactions table.
+            # TODO(blais): Rename 'pnl' to 'pnl_open'.
+            .addfield('cost', None)
+
+            # Convert numbers.
+            .convert(['price', 'mark', 'net_liq', 'pnl', 'pnl_day'], ToDecimal)
+
+            # Clean up the final table.
+            .cut('symbol', 'quantity', 'price', 'mark', 'cost', 'net_liq', 'pnl', 'pnl_day'))
+
+    return table
+
+
+
+def GetPositions(filename: str) -> Table:
+    """Read and parse the positions statement."""
+
+    # Read the positions table.
+    with open(filename) as csvfile:
+        lines = csvfile.readlines()
+
+    match = re.search(r'Position Statement for (\d+)', lines[0])
+    assert match, "Missing account name from position statement: '{}'".format(lines[0])
+    account = match.group(1)
+
+    # Prepare tables for aggregation, inserting groups and stripping subtables
+    # (no reason to treat Equities and Futures distinctly).
+    groups = SplitGroups(lines)
+
+    tables = []
+    for x in groups:
+        gtable = (FoldInstrument(x.table)
+                  .addfield('group', x.name, index=0))
+        tables.append(gtable)
+
+    table = (petl.cat(*tables)
+             .addfield('account', account, index=0))
+    return table
 
 
 def ConsolidatePositionStatement(
@@ -133,7 +311,6 @@ def ConsolidatePositionStatement(
         if debug_tables:
             print(xtable.lookallstr())
 
-
         ftable = (gtable
                   # Remove redundant detail.
                   .select(lambda r: bool(r['BP Effect']))
@@ -154,8 +331,6 @@ def ConsolidatePositionStatement(
 
     if debug_tables:
         raise SystemExit
-
-
 
     # Consolidate the table.
     atable = petl.cat(*tables)
@@ -218,10 +393,6 @@ def Report(atable: Table, totals: Table,
     print(top_table.lookallstr())
 
 
-def GetPositions(filename: str) -> Table:
-    return None
-
-
 def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     """Return true if this file is a matching transactions file."""
     _FILENAME_RE = r"(\d{4}-\d{2}-\d{2})-PositionStatement.csv"
@@ -254,9 +425,9 @@ def main(positions_csv: str, reference: Decimal, notional: bool):
             reference = sprice.price
 
     # Read positions statement and consolidate it.
-    table = petl.fromcsv(positions_csv)
     #print(table.lookallstr())
-    atable, totals = ConsolidatePositionStatement(table, reference, debug_tables=notional)
+    table = petl.fromcsv(filename)
+    atable, totals = ConsolidatePositionStatement(filename, reference, debug_tables=notional)
 
     if not notional:
         Report(atable, totals, 10)

@@ -29,21 +29,26 @@ from beanbuff.tastyworks import tastyworks_positions
 from beanbuff.ameritrade import thinkorswim_positions
 
 
-def GetPositions(fileordirs: List[str]) -> Table:
+def GetPositions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
     """Find files and parse and concatenate contents."""
 
     matches = discovery.FindFiles(
-        fileordirs,
-        [tastyworks_positions.MatchFile,
-         #thinkorswim_positions.MatchFile
-         ])
+        fileordirs, [
+            tastyworks_positions.MatchFile,
+            thinkorswim_positions.MatchFile
+        ])
 
+    filenames = []
     tables = []
     for unused_account, (filename, parser) in sorted(matches.items()):
         positions = parser(filename)
+        if not positions:
+            continue
+        filenames.append(filename)
         tables.append(positions)
 
-    return petl.cat(*tables)
+    table = petl.cat(*tables) if tables else petl.empty()
+    return table, filenames
 
 
 @click.command()
@@ -54,11 +59,7 @@ def main(fileordirs: List[str], verbose: bool):
     logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
     # Read the input files.
-    positions = GetPositions(fileordirs)
-    if positions:
-        logging.fatal("No input files to read from the arguments.")
-        return
-
+    positions, filenames = GetPositions(fileordirs)
     print(positions.lookallstr())
 
 

@@ -7,6 +7,18 @@ from typing import List, NamedTuple, Optional
 
 
 
+# TODO(blais): Add methods to create each of the subtypes of instruments, with
+# validation.
+#
+# TODO(blais): Add accessor for instrument type (e.g., "Future Option").
+#
+# TODO(blais): Fold the calendar months into the underlyings and provide methods
+# to extract them instead.
+#
+# TODO(blais): What about the subtype, e.g. (European) (Physical), etc.? That
+# is currently lost.
+
+
 # A representation of an option.
 class Instrument(NamedTuple):
     # The name of the underlying instrument, stock or futures. For futures, this
