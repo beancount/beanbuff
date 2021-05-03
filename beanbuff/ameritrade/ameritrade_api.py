@@ -35,7 +35,6 @@ import logging
 import re
 import sys
 import uuid
-import pprint
 
 from dateutil import parser
 
@@ -335,6 +334,7 @@ def DoThirdParty(txn):
 
 
 @dispatch('DIVIDEND_OR_INTEREST', 'FREE BALANCE INTEREST ADJUSTMENT')
+@dispatch('DIVIDEND_OR_INTEREST', 'MARGIN INTEREST ADJUSTMENT')
 def DoBalanceInterestAdjustment(txn):
     entry = CreateTransaction(txn)
     units = GetNetAmount(txn)
@@ -392,12 +392,7 @@ def DoTrade(txn, commodities):
     # Add the common order id as metadata, to make together multi-leg options
     # orders.
     if 'orderId' in txn:
-        match = re.match(r"([A-Z0-9]+)\.\d+", txn['orderId'])
-        if match:
-            order_id = match.group(1)
-        else:
-            order_id = txn['orderId']
-        entry.links.add('order-{}'.format(order_id))
+        entry.links.add('order-{}'.format(ameritrade.NormalizeOrderId(txn['orderId'])))
 
     # Figure out if this is a sale / clkosing transaction.
     item = txn['transactionItem']
@@ -882,7 +877,7 @@ def main():
             if txn['transactionId'] != args.debug_transaction:
                 continue
             else:
-                pprint.pprint(txn)
+                pprint(txn)
 
         # print('{:30} {}'.format(txn['type'], txn['description'])); continue
         dispatch_entries = RunDispatch(txn, balances, commodities, args.raise_error)
