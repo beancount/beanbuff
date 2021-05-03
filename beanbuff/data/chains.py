@@ -81,13 +81,15 @@ def Group(transactions: Table,
 
         # Link together by order id.
         if by_order:
-            graph.add_node(rec.order_id, type='order')
-            graph.add_edge(rec.transaction_id, rec.order_id)
+            if rec.order_id:
+                graph.add_node(rec.order_id, type='order')
+                graph.add_edge(rec.transaction_id, rec.order_id)
 
         # Link together by match id.
         if by_match:
-            graph.add_node(rec.match_id, type='match')
-            graph.add_edge(rec.transaction_id, rec.match_id)
+            if rec.match_id:
+                graph.add_node(rec.match_id, type='match')
+                graph.add_edge(rec.transaction_id, rec.match_id)
 
     # Link together matches that overlap in underlying and time.
     linked_matches = _LinkMatches(transactions)
@@ -155,14 +157,18 @@ def _CreateChainId(transaction_id: str, _: datetime.datetime) -> str:
     return ">{}".format(md5.hexdigest())
 
 
-# def RenderChain(transactions: Table, chain_id):
-#     """Render a chain in a nice readable way."""
+def RenderChain(transactions: Table, chain_id):
+    """Render a chain in a nice readable way."""
+
+    chain_txns = (transactions
+                  .selecteq('chain_id', chain_id))
+
+    print(chain_txns.lookallstr())
+    # for rec in chain_txns.records():
+    #     print(rec)
 
 
-# def Credits(row: Record) -> Decimal:
-#     return -row.quantity * row.price * CSIZE
-#
-#
+
 # def RenderTradeTable(trade: List[Txn], file=None):
 #     """Render a trade table to the givne file object."""
 #
@@ -197,4 +203,3 @@ def _CreateChainId(transaction_id: str, _: datetime.datetime) -> str:
 #     pr("Position MTM: {}".format(pos_mtm))
 #     pr("Chain Value: {}".format(credits_closed + credits_active))
 #     pr()
-#
