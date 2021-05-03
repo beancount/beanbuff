@@ -22,3 +22,13 @@ test: $(IMPORTERS:.py=.test)
 
 $(IMPORTERS:.py=.test) : %.test : beanbuff/%.py
 	python3 $< test $(BEANMEAT)/$(basename $@)
+
+
+tw:
+	python3 -m beanbuff.data.consolidated --html=$(HOME)/tw.html $(HOME)/tasty*
+
+tw-transactions:
+	python3 -m beanbuff.data.transactions $(HOME)/tasty*
+
+tos:
+	python3 -m beanbuff.data.consolidated --html=$(HOME)/tos.html $(HOME)/*Statement.csv
