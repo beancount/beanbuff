@@ -27,6 +27,9 @@ from beanbuff.tastyworks import tastysyms
 from beanbuff.tastyworks.tastyutils import ToDecimal
 
 
+ZERO = Decimal(0)
+
+
 def GetTransactionId(rec: Record) -> str:
     """Make up a unique transaction id."""
     md5 = hashlib.blake2s(digest_size=6)
@@ -35,14 +38,23 @@ def GetTransactionId(rec: Record) -> str:
     return "^{}".format(md5.hexdigest())
 
 
+_ROW_TYPES = {
+    'Trade': 'Trade',
+    'Receive Deliver': 'Expire',
+}
+
 def GetRowType(rowtype: str) -> str:
     """Validate the row type."""
-    assert rowtype in {'Trade', 'Expiration', 'Mark'}
-    return rowtype
+    try:
+        return _ROW_TYPES[rowtype]
+    except KeyError:
+        return KeyError("Invalid rowtype: '{}'".format(rowtype))
 
 
 def GetPrice(rec: Record) -> Decimal:
     """Get the per-contract price."""
+    if rec.rowtype == 'Expire':
+        return ZERO
     match = re.search(r"@ ([0-9.]+)$", rec.Description)
     if not match:
         raise ValueError("Could not infer price from description: {}".format(rec))
@@ -52,7 +64,7 @@ def GetPrice(rec: Record) -> Decimal:
 def GetMultiplier(rec: Record) -> Decimal:
     """Get the underlying contract multiplier."""
     multiplier = rec.instrument.multiplier
-    if rec['Instrument Type'] != 'Future':
+    if rec['Instrument Type'] != 'Future' and rec['Average Price'] != ZERO:
         # Sanity check: Verify that the approximate multiplier you can compute
         # using the (rounded) average price is close to the one we infer from
         # our futures library. This is a cross-check for the futures library
@@ -87,7 +99,7 @@ def GetInstruction(rec: Record) -> Optional[str]:
     elif rec.Action.startswith('SELL'):
         return 'SELL'
     else:
-        raise NotImplementedError("Unknown instruction: {}".format(rec))
+        raise NotImplementedError("Unknown instruction: '{}'".format(rec.Action))
 
 
 def GetPosEffect(rec: Record) -> Optional[str]:
@@ -95,6 +107,8 @@ def GetPosEffect(rec: Record) -> Optional[str]:
     if rec.Action.endswith('TO_OPEN'):
         return 'OPENING'
     elif rec.Action.endswith('TO_CLOSE'):
+        return 'CLOSING'
+    elif rec.rowtype == 'Expire':
         return 'CLOSING'
     else:
         return ''
@@ -182,7 +196,8 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              .rename('Fees', 'fees')
 
              # Split 'Action' field.
-             .addfield('instruction', GetInstruction)
+             .addfield('instruction',
+                       lambda r: GetInstruction(r) if r.rowtype == 'Trade' else '')
              .addfield('effect', GetPosEffect)
 
              # Remove instrument we parsed early on.
@@ -211,7 +226,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
 
 def SplitTables(table: Table) -> Tuple[Table, Table]:
     """Split the table into transactions and others."""
-    return table.biselect(lambda r: r.Type == 'Trade')
+    return table.biselect(lambda r: r.Type != 'Money Movement')
 
 
 def GetAccount(filename: str) -> str:

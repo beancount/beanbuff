@@ -18,7 +18,7 @@ A *normalized* transactions table contains the following columns and types.
 - `rowtype`: An enum for the row, one of
 
   * `Trade` (a purchase or sale),
-  * `Expiration` (an expiration),
+  * `Expire` (an expiration, a receive and deliver type of event),
   * `Mark` (a virtual sale).
 
   `MARK` is never inserted by the normalization code, that's something that is
