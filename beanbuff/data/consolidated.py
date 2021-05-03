@@ -45,11 +45,12 @@ P50 = Decimal('0.80')
 
 def ChainName(rec: Record) -> str:
     """Generate a unique chain name."""
-    return "{}.{}.{}.{}".format(
+    # Note: We don't know the max date, so we stick with the front date only in
+    # the readable chain name.
+    return ".".join([
         rec.account,
-        "{:%y%m%d}".format(rec.mindate),
-        "{:%y%m%d}".format(rec.maxdate) if not rec.active else 'now',
-        rec.underlying)
+        "{:%y%m%d_%H%M%S}".format(rec.mindate),
+        rec.underlying])
 
 
 def InitialCredits(pairs: Iterator[Tuple[str, Decimal]]) -> Decimal:
@@ -75,8 +76,8 @@ def TransactionsToChains(transactions: Table) -> Table:
     # Aggregate across chains, keeping the row type.
     agg = {
         'account': ('account', first),
-        'mindate': ('datetime', lambda g: min(g).date()),
-        'maxdate': ('datetime', lambda g: max(g).date()),
+        'mindate': ('datetime', lambda g: min(g)),
+        'maxdate': ('datetime', lambda g: max(g)),
         'underlying': ('underlying', first),
         'cost': ('cost', sum),
         'init': (('order_id', 'cost'), InitialCredits),
@@ -113,6 +114,8 @@ def TransactionsToChains(transactions: Table) -> Table:
         .replace('active', None, False)
         .addfield('days', lambda r: (r.maxdate - r.mindate).days)
         .addfield('chain_name', ChainName)
+        .convert('mindate', lambda v: v.date())
+        .convert('maxdate', lambda v: v.date())
         .sort(['underlying', 'maxdate']))
 
     return chains
