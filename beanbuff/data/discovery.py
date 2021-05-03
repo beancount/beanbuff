@@ -39,8 +39,8 @@ def FindFiles(fileordirs: List[str],
 
     for filename in fileordirs:
         if path.isdir(filename):
-            for filename in os.listdir(filename):
-                MatchStore(filename)
+            for fn in os.listdir(filename):
+                MatchStore(path.join(filename, fn))
         else:
             MatchStore(filename)
 
