@@ -66,7 +66,6 @@ def Match(transactions: Table) -> Dict[str, str]:
         if match_id:
             match_map[rec.transaction_id] = match_id
 
-
     # Insert Mark rows to close out the positions virtually.
     closing_transactions = [
         ('account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
@@ -97,7 +96,8 @@ def Match(transactions: Table) -> Dict[str, str]:
         if r.rowtype == 'Expire':
             quantity = abs(expire_map[r.transaction_id])
             if r.quantity and r.quantity != quantity:
-                raise ValueError("Invalid expiration quantity for row: {}".format(r))
+                raise ValueError("Invalid expiration quantity for row: "
+                                 "{} != {} from {}".format(r.quantity, quantity, r))
         else:
             quantity = r.quantity
         return quantity

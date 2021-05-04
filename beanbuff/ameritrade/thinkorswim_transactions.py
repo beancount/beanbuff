@@ -195,9 +195,8 @@ def ProcessTradeHistory(equities_cash: Table,
         mapping = cash_table.recordlookup('datetime')
         for dtime, cash_rows in mapping.items():
             # If the transaction is not a trade, ignore it.
-            # Dividends, expirations and others will have to be processed elsewhere.
+            # Dividends, expirations are processed elsewhere.
             if not any(crow.type == 'TRD' for crow in cash_rows):
-                # Process dividends and expirations.
                 continue
 
             # Pull up the rows corresponding to this cash statement and remove
@@ -222,6 +221,47 @@ def ProcessTradeHistory(equities_cash: Table,
                          "{}".format(trade_hist_map))
 
     return equities_groups, futures_groups
+
+
+
+def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
+    """Look at cash table and extract and normalize expirations from it."""
+    expirations = (
+        cash_table
+        .selecteq('type', 'RAD')
+        .select(lambda r: re.match(r'REMOVAL OF OPTION DUE TO EXPIRATION', r.description))
+        .addfield('_x', _ParseExpirationDescriptionDetailed)
+        .convert('quantity', lambda _, r: r._x['quantity'], pass_row=True)
+        .addfields([(name, lambda r, n=name: r._x.get(n)) for name in [
+            'instype',
+            'underlying',
+            'expiration',
+            ]])
+        .addfield('expcode', '')
+        .addfields([(name, lambda r, n=name: r._x.get(n)) for name in [
+            'putcall',
+            'strike',
+            'multiplier',
+            'instruction']])
+        .cutout('_x')
+
+        # Fix up the remaining fields.
+        .addfield('order_id', None)
+        .addfield('effect', 'CLOSING')
+        .addfield('rowtype', 'Expire')
+        .addfield('instype', None)
+        .addfield('commissions', ZERO)
+        .rename('commissions_fees', 'fees')
+        .addfield('price', ZERO)
+
+        # Clean up for the final table.
+        .cut('datetime', 'order_id', 'rowtype',
+             'effect', 'instruction',
+             'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike',
+             'multiplier',
+             'quantity', 'price', 'commissions', 'fees', 'description')
+    )
+    return expirations
 
 
 Group = Tuple[datetime.date, List[Record], List[Record]]
@@ -468,7 +508,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .addfield('expcode', lambda r: r._instrument.expcode)
         .addfield('putcall', lambda r: 'PUT' if r._instrument.putcall == 'P' else 'CALL')
         .addfield('strike', lambda r: r._instrument.strike)
-        .addfield('multiplier', lambda r: r._instrument.multiplier)
+        .addfield('multiplier', lambda r: Decimal(r._instrument.multiplier))
         .cutout('symbol', 'exp', 'strike', 'type')
         .cutout('_instrument')
 
@@ -701,6 +741,15 @@ def _ParseTradeDescription(description: str) -> Dict[str, Any]:
     raise ValueError(message)
 
 
+def _ParseDividendDescription(description: str) -> Dict[str, Any]:
+    """Parse the description field of an expiration."""
+    match = re.match("ORDINARY (?P<strategy>DIVIDEND)~(?P<symbol>[A-Z0-9]+)", description)
+    assert match, description
+    matches = match.groupdict()
+    matches['quantity'] = Decimal('0')
+    return matches
+
+
 def _ParseExpirationDescription(description: str) -> Dict[str, Any]:
     """Parse the description field of an expiration."""
     regexp = "".join([
@@ -725,12 +774,31 @@ def _ParseExpirationDescription(description: str) -> Dict[str, Any]:
             'symbol': matches['underlying']}
 
 
-def _ParseDividendDescription(description: str) -> Dict[str, Any]:
+# A second version of this that provides all the required detail for any
+# instrument.
+def _ParseExpirationDescriptionDetailed(rec: Record) -> Dict[str, Any]:
     """Parse the description field of an expiration."""
-    match = re.match("ORDINARY (?P<strategy>DIVIDEND)~(?P<symbol>[A-Z0-9]+)", description)
+    regexp = "".join([
+        "REMOVAL OF OPTION DUE TO EXPIRATION ",
+        "(?P<quantity>[+-]?[0-9.]+) ",
+        "(?P<underlying>[A-Z/:]+) ",
+        "(?P<multiplier>\d+) ",
+        "(?P<suffix>\(.*\) )?",
+        "(?P<expiration>\d+ [A-Z]{3} \d+) ",
+        "(?P<strike>[0-9.]+) ",
+        "(?P<putcall>PUT|CALL)",
+    ])
+    match = re.match(regexp, rec.description)
     assert match, description
     matches = match.groupdict()
-    matches['quantity'] = Decimal('0')
+    underlying = matches['underlying']
+    matches['instype'] = 'Future Option' if underlying.startswith('/') else 'Equity Option'
+    matches['expiration'] = parser.parse(matches['expiration']).date()
+    matches['strike'] = Decimal(matches['strike'])
+    matches['multiplier'] = Decimal(matches['multiplier'])
+    signed_quantity = Decimal(matches['quantity'])
+    matches['quantity'] = abs(signed_quantity)
+    matches['instruction'] = 'SELL' if signed_quantity < ZERO else 'BUY'
     return matches
 
 
@@ -759,28 +827,24 @@ def GetTransactions(filename: str) -> Dict[str, Table]:
     futures_trade, futures_nontrade = SplitFuturesStatements(futures, tradehist)
     futures_entries = ProcessNonTradeFutures(cashbal_nontrade)
 
-    cash_trade = (petl.cat(equities_trade, futures_trade)
-                  .sort('datetime'))
-
     # Match up the equities and futures statements entries to the trade
     # history and ensure a perfect match, returning groups of (date-time,
     # cash-rows, trade-rows), properly matched.
     equities_groups, futures_groups = ProcessTradeHistory(
         equities_trade, futures_trade, tradehist)
 
-    if 0:
-        # Debug print.
-        for group in futures_groups:
-            PrintGroup(group)
-        raise SystemExit
-
     # Convert matched groups of rows to trnasctions.
     equities_txns = SplitGroupsToTransactions(equities_groups, False)
     futures_txns = SplitGroupsToTransactions(futures_groups, True)
 
+    # Extract and process expirations.
+    equities_expi = ProcessExpirationsToTransactions(equities_trade)
+    futures_expi = ProcessExpirationsToTransactions(futures_trade)
+
     # Concatenate the tables.
     fieldnames = equities_txns.columns()
-    txns = (petl.cat(equities_txns, futures_txns)
+    txns = (petl.cat(equities_txns, equities_expi,
+                     futures_txns, futures_expi)
             .sort('datetime'))
 
     # Add a cost column, calculated from the data.
@@ -802,10 +866,6 @@ def GetTransactions(filename: str) -> Dict[str, Table]:
             # Add a cost row.
             .addfield('cost', Cost)
             )
-
-    if 0:
-        print(txns.lookallstr())
-        raise SystemExit
 
     # Make the final ordering correct and finalize the columns.
     txns = (txns
@@ -890,10 +950,13 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
 @click.argument('filename', type=click.Path(resolve_path=True, exists=True))
 def main(filename: str):
     """Main program."""
-    trades_table, _ = GetTransactions(filename)
+
+    trades_table, other_table = GetTransactions(filename)
     if 1:
         print(trades_table.lookallstr())
         return
+    else:
+        print(other_table.lookallstr())
 
 
 # TODO(blais): Get the expirations in the trades table.
