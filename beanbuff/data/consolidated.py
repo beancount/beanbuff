@@ -22,8 +22,10 @@ from more_itertools import first
 import click
 from dateutil import parser
 
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from beancount import loader
+from beancount.core import data
 
+from beanbuff.data.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import transactions as transactions_mod
 from beanbuff.data import positions as positions_mod
 from beanbuff.data import beansym
@@ -97,7 +99,7 @@ def TransactionsToChains(transactions: Table) -> Table:
         .sort('underlying'))
 
     # Split historical and active chains aggregate and join them to each other.
-    histo, mark = typed_chains.biselect(lambda r: r.rowtype == 'Trade')
+    histo, mark = typed_chains.biselect(lambda r: r.rowtype in {'Trade', 'Expire'})
     chains = petl.outerjoin(
         (histo
          .cutout('rowtype', 'net_liq', 'pnl_day')
@@ -285,9 +287,13 @@ def ToHtml(table: Table, filename: str):
 
 @click.command()
 @click.argument('fileordirs', nargs=-1, type=click.Path(resolve_path=True, exists=True))
-@click.option('--html', type=click.Path(exists=False))
-@click.option('--inactive', is_flag=True)
-def main(fileordirs: str, html: str, inactive: bool):
+@click.option('--ledger', '-l', type=click.Path(exists=False),
+              help="Remove transactions from Ledger. Requires order ids.")
+@click.option('--html', type=click.Path(exists=False),
+              help="Generate HTML output file.")
+@click.option('--inactive', is_flag=True,
+              help="Include inactive chains.")
+def main(fileordirs: str, html: Optional[str], inactive: bool, ledger: Optional[str]):
     """Main program."""
     logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
@@ -295,6 +301,26 @@ def main(fileordirs: str, html: str, inactive: bool):
     transactions, _ = transactions_mod.GetTransactions(fileordirs)
     if not transactions:
         logging.fatal("No input files to read from the arguments.")
+
+    # Remove transactions from the Ledger if there are any.
+    if ledger:
+        # Read a list of order ids to remove.
+        order_ids = set()
+        entries, _, __ = loader.load_file(ledger)
+        match_link = re.compile('order-(.*)').match
+        for entry in data.filter_txns(entries):
+            # Ignore files other than the root file.
+            # This is because I place trading in included files.
+            if entry.meta['filename'] != ledger:
+                continue
+            for link in entry.links:
+                match = match_link(link)
+                if match:
+                    order_ids.add(match.groups(1))
+
+        # Remove rows with those order ids.
+        transactions = (transactions
+                        .selectnotin('order_id', order_ids))
 
     # Read the positions files.
     positions, _ = positions_mod.GetPositions(fileordirs)
