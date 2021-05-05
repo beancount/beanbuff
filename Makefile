@@ -32,3 +32,6 @@ tw-transactions:
 
 tos:
 	python3 -m beanbuff.data.consolidated --html=$(HOME)/tos.html $(HOME)/*Statement.csv
+
+buff:
+	FLASK_ENV=development FLASK_APP=beanbuff.scripts.buff flask run

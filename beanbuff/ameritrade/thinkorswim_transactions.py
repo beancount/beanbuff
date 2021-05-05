@@ -26,10 +26,10 @@ import datetime
 import hashlib
 import itertools
 import logging
+import os
 import pprint
 import re
 import typing
-import os
 
 import click
 from dateutil import parser
@@ -123,12 +123,12 @@ def SplitFuturesStatements(futures: Table, tradehist: Table) -> Tuple[Table, Tab
 def ProcessNonTradeCash(nontrade: Table) -> data.Entries:
     """Produce the non-trade 'Cash Balance' entries."""
     # TODO(blais):
-    return []
+    return nontrade
 
-def ProcessNonTradeFutures(cash_nontrade: Table) -> data.Entries:
+def ProcessNonTradeFutures(nontrade: Table) -> data.Entries:
     """Produce the non-trade 'Futures Statements' entries."""
     # TODO(blais):
-    return []
+    return nontrade
 
 
 def ReconcilePairsOrderIds(table: Table, threshold: int) -> Table:
@@ -410,11 +410,19 @@ def CashBalance_Prepare(table: Table) -> Table:
     """Process the cash account statement balance."""
     table = (
         table
+
+        # Add unique row id right at the input.
+        .addfield('rowid',
+                  partial(_CreateRowId,
+                          fields=('date', 'time', 'type', 'description',
+                                  'commissions_fees', 'amount', 'balance')),
+                  index=0)
+
         # Remove bottom totals line.
         .select('description', lambda v: v != 'TOTAL')
 
         # Convert date/time to a single field.
-        .addfield('datetime', partial(ParseDateTimePair, 'date', 'time'), index=0)
+        .addfield('datetime', partial(ParseDateTimePair, 'date', 'time'), index=1)
         .cutout('date', 'time')
 
         # Convert numbers to Decimal instances.
@@ -424,12 +432,17 @@ def CashBalance_Prepare(table: Table) -> Table:
         # balances.
         .addfieldusingcontext('misc_fees', _ComputeMiscFees)
     )
-
-    if 0:
-        print("CashBalance_Prepare\n",
-              table.head(10).lookallstr()); # TODO(blais): Remove
-
     return ParseDescription(table)
+
+
+def _CreateRowId(r: Record, fields: List[str]) -> str:
+    """Create a unique row if from the given field values."""
+    md5 = hashlib.blake2s(digest_size=4)
+    for fname in fields:
+        value = getattr(r, fname)
+        md5.update(value.encode('utf8'))
+    return md5.hexdigest()
+
 
 def _ComputeMiscFees(prev: Record, rec: Record, _: Record) -> Decimal:
     """Compute the Misc Fees backed from balance difference."""
@@ -442,12 +455,21 @@ def _ComputeMiscFees(prev: Record, rec: Record, _: Record) -> Decimal:
 def FuturesStatements_Prepare(table: Table) -> Table:
     table = (
         table
+
+        # Add unique row id right at the input.
+        .addfield('rowid',
+                  partial(_CreateRowId,
+                          fields=('trade_date', 'exec_date', 'exec_time',
+                                  'type', 'description',
+                                  'commissions_fees', 'misc_fees', 'amount', 'balance')),
+                  index=0)
+
         # Remove bottom totals line.
         .select('description', lambda v: v != 'TOTAL')
 
         # Convert date/time to a single field.
         .addfield('datetime',
-                  partial(ParseDateTimePair, 'exec_date', 'exec_time'), index=0)
+                  partial(ParseDateTimePair, 'exec_date', 'exec_time'), index=1)
         .cutout('exec_date', 'exec_time')
         .convert('trade_date',
                  lambda v: datetime.datetime.strptime(v, '%m/%d/%y').date())
@@ -459,11 +481,6 @@ def FuturesStatements_Prepare(table: Table) -> Table:
         .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), ToDecimal)
         .convert('ref', lambda v: int(v) if v else 0)
     )
-
-    if 0:
-        print("FuturesStatements_Prepare\n",
-              table.head(10).lookallstr()); # TODO(blais): Remove
-
     return ParseDescription(table)
 
 
@@ -806,7 +823,7 @@ def CleanDescriptionPrefixes(string: str) -> str:
     return re.sub('(WEB:(AA_[A-Z]+|WEB_GRID_SNAP)|tAndroid) ', '', string)
 
 
-def GetTransactions(filename: str) -> Dict[str, Table]:
+def GetTransactions(filename: str) -> Tuple[Table, Table]:
     """Read and prepare all the tables to be joined."""
 
     tables = PrepareTables(filename)
@@ -874,10 +891,9 @@ def GetTransactions(filename: str) -> Dict[str, Table]:
                  'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees', 'description',
                  ))
 
-    # TODO(blais): Add non-trade table.
-    others_table = Table()
+    cash_accounts = petl.cat(cashbal_entries, futures_entries)
 
-    return txns, others_table
+    return txns, cash_accounts
 
 
 def GetTransactionId(rec: Record) -> str:
@@ -899,6 +915,7 @@ def GetAccountNumber(filename: str) -> str:
 
 
 def PrepareTables(filename: str) -> Dict[str, Table]:
+    """Clean up all the input tables."""
 
     # Handlers for each of the sections.
     handlers = {
@@ -948,18 +965,16 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
 
 @click.command()
 @click.argument('filename', type=click.Path(resolve_path=True, exists=True))
-def main(filename: str):
+@click.option('--cash', is_flag=True,
+              help="Print out cash transactions.")
+def main(filename: str, cash):
     """Main program."""
 
     trades_table, other_table = GetTransactions(filename)
-    if 1:
+    if not cash:
         print(trades_table.lookallstr())
-        return
     else:
         print(other_table.lookallstr())
-
-
-# TODO(blais): Get the expirations in the trades table.
 
 
 if __name__ == '__main__':

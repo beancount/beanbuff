@@ -8,7 +8,7 @@ chains.
 import collections
 from decimal import Decimal
 from os import path
-from typing import Any, Callable, List, Optional, Tuple, Iterator, Iterable
+from typing import Any, Callable, List, Optional, Tuple, Iterator, Iterable, Set
 import types
 import datetime
 import hashlib
@@ -95,14 +95,18 @@ def TransactionsToChains(transactions: Table) -> Table:
         transactions
         .replace('commissions', None, ZERO)
         .replace('fees', None, ZERO)
-        .aggregate(['chain_id', 'rowtype'], agg)
+
+        # Aggregate by chain and row type.
+        .addfield('ismark', lambda r: r.rowtype == 'Mark')
+        .aggregate(['chain_id', 'ismark'], agg)
+
         .sort('underlying'))
 
     # Split historical and active chains aggregate and join them to each other.
-    histo, mark = typed_chains.biselect(lambda r: r.rowtype in {'Trade', 'Expire'})
+    mark, histo = typed_chains.biselect(lambda r: r.ismark)
     chains = petl.outerjoin(
         (histo
-         .cutout('rowtype', 'net_liq', 'pnl_day')
+         .cutout('ismark', 'net_liq', 'pnl_day')
          .rename('cost', 'accr')),
         (mark
          .cut('chain_id', 'cost', 'net_liq', 'pnl_day')
@@ -129,7 +133,7 @@ def FormatActiveChains(chains: Table) -> Table:
     # Clean up and format the table a bit.
     chains = (
         chains
-        .cut('account', 'chain_name', 'chain_id',
+        .cut('account', 'chain_name', 'chain_id', 'active',
              'underlying', 'mindate', 'maxdate',
              'init', 'accr', 'cost', 'commissions', 'fees',
              'days',
@@ -285,45 +289,45 @@ def ToHtml(table: Table, filename: str):
         print(final, file=ofile)
 
 
-@click.command()
-@click.argument('fileordirs', nargs=-1, type=click.Path(resolve_path=True, exists=True))
-@click.option('--ledger', '-l', type=click.Path(exists=False),
-              help="Remove transactions from Ledger. Requires order ids.")
-@click.option('--html', type=click.Path(exists=False),
-              help="Generate HTML output file.")
-@click.option('--inactive', is_flag=True,
-              help="Include inactive chains.")
-def main(fileordirs: str, html: Optional[str], inactive: bool, ledger: Optional[str]):
-    """Main program."""
-    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
+def GetOrderIdsFromLedger(filename: str) -> Set[str]:
+    """Read a list of order ids to remove from a Beancount ledger."""
+    filename = path.abspath(filename)
+    order_ids = set()
+    entries, _, __ = loader.load_file(filename)
+    match_link = re.compile('order-(.*)').match
+    for entry in data.filter_txns(entries):
+        # Ignore files other than the root file.
+        # This is because I place trading in included files.
+        if entry.meta['filename'] != filename:
+            continue
+        for link in entry.links:
+            match = match_link(link)
+            if match:
+                order_ids.add(match.groups(1))
+    return order_ids
+
+
+def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
+    """Read all the data and join it and consolidate it."""
 
     # Read the transactions files.
-    transactions, _ = transactions_mod.GetTransactions(fileordirs)
+    transactions, filenames = transactions_mod.GetTransactions(fileordirs)
+    for fn in filenames:
+        logging.info("Read file '%s'", fn)
     if not transactions:
         logging.fatal("No input files to read from the arguments.")
 
     # Remove transactions from the Ledger if there are any.
     if ledger:
-        # Read a list of order ids to remove.
-        order_ids = set()
-        entries, _, __ = loader.load_file(ledger)
-        match_link = re.compile('order-(.*)').match
-        for entry in data.filter_txns(entries):
-            # Ignore files other than the root file.
-            # This is because I place trading in included files.
-            if entry.meta['filename'] != ledger:
-                continue
-            for link in entry.links:
-                match = match_link(link)
-                if match:
-                    order_ids.add(match.groups(1))
-
         # Remove rows with those order ids.
+        order_ids = GetOrderIdsFromLedger(ledger)
         transactions = (transactions
                         .selectnotin('order_id', order_ids))
 
     # Read the positions files.
-    positions, _ = positions_mod.GetPositions(fileordirs)
+    positions, filenames = positions_mod.GetPositions(fileordirs)
+    for fn in filenames:
+        logging.info("Read file '%s'", fn)
 
     # TODO(blais): Do away with this eventually.
     transactions = (transactions
@@ -362,24 +366,44 @@ def main(fileordirs: str, html: Optional[str], inactive: bool, ledger: Optional[
 
     # Convert to chains.
     chains = TransactionsToChains(transactions)
-    if not inactive:
-        chains = (chains
-                  .selecteq('active', True))
 
     # Clean up the chains and add targets.
-    final_chains = FormatActiveChains(chains)
+    return FormatActiveChains(chains)
+
+
+@click.command()
+@click.argument('fileordirs', nargs=-1, type=click.Path(resolve_path=True, exists=True))
+@click.option('--ledger', '-l', type=click.Path(exists=False),
+              help="Remove transactions from Ledger. Requires order ids.")
+@click.option('--html', type=click.Path(exists=False),
+              help="Generate HTML output file.")
+@click.option('--inactive', is_flag=True,
+              help="Include inactive chains.")
+def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: bool):
+    """Main program."""
+    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
+
+    # Read in and consolidate all the data.
+    chains = ConsolidateChains(fileordirs, ledger)
+
+    # Remove inactive chains if requested.
+    if not inactive:
+        chains = (chains
+                        .selecteq('active', True))
+
+    # Output the table.
+    print(chains.lookallstr())
     if html:
-        ToHtml(final_chains, html)
-    print(final_chains.lookallstr())
+        ToHtml(chains, html)
 
     # Render some totals.
     agg = {
         'commissions': ('commis', sum),
         'fees': ('fees', sum),
     }
-    if 'chain_pnl' in final_chains.fieldnames():
+    if 'chain_pnl' in chains.fieldnames():
         agg['total_pnl'] = ('chain_pnl', sum)
-    print(final_chains
+    print(chains
           .aggregate(None, agg).lookallstr())
 
 
