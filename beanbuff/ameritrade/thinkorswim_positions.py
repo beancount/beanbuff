@@ -210,7 +210,7 @@ def FoldInstrument(table: Table) -> Table:
     #   futures options, there will also be rows dedicated to the corresponding
     #   underlyings, even if their quantity is zero. Remove those.
 
-    return (table
+    table = (table
 
             # Fold the special underlying row.
             .addfield('symroot',
@@ -269,12 +269,15 @@ def GetPositions(filename: str) -> Table:
 
     tables = []
     for x in groups:
+        if x.table.nrows() == 0:
+            continue
         gtable = (FoldInstrument(x.table)
                   .addfield('group', x.name, index=0))
         tables.append(gtable)
 
     table = (petl.cat(*tables)
              .addfield('account', account, index=0))
+
     return table
 
 
