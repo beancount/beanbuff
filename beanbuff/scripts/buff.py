@@ -2,7 +2,7 @@
 """Web application for all the files.
 """
 
-from typing import Any, Callable, List, Optional, Tuple, Iterator, Iterable, Set, NamedTuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Iterator, Iterable, Set, NamedTuple
 
 from os import path
 import os
@@ -56,11 +56,24 @@ def ToHtmlString(table: Table, cls: str):
     return html
 
 
+def GetNavigation() -> Dict[str, str]:
+    """Get navigation bar."""
+    return {'chains': flask.url_for('chains'),
+            'transactions': flask.url_for('transactions'),
+            'positions': flask.url_for('positions')}
+
 
 @app.route('/')
 def home():
+    return flask.redirect(flask.url_for('chains'))
+
+
+@app.route('/chains')
+def chains():
     return flask.render_template(
-        'chains.html', table=ToHtmlString(STATE.chains, 'chains'))
+        'chains.html',
+        table=ToHtmlString(STATE.chains, 'chains'),
+        **GetNavigation())
 
 
 @app.route('/chain/<chain_id>')
@@ -68,9 +81,26 @@ def chain(chain_id: str):
     txns = (STATE.transactions
             .selecteq('chain_id', chain_id))
     return flask.render_template(
-        'chain.html', table=ToHtmlString(txns, 'chain'),
-        chain_id=chain_id)
+        'chain.html',
+        table=ToHtmlString(txns, 'chain'),
+        chain_id=chain_id,
+        **GetNavigation())
 
+
+@app.route('/transactions')
+def transactions():
+    return flask.render_template(
+        'transactions.html',
+        table=ToHtmlString(STATE.transactions, 'transactions'),
+        **GetNavigation())
+
+
+@app.route('/positions')
+def positions():
+    return flask.render_template(
+        'positions.html',
+        table=ToHtmlString(STATE.positions, 'positions'),
+        **GetNavigation())
 
 
 # @click.group(cls=flask.FlaskGroup, create_app=create_app)

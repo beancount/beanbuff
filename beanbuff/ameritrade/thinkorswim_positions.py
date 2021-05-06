@@ -45,6 +45,7 @@ from beanbuff.data import beansym
 from beanbuff.data import futures
 # TODO(blais): Move this to a common location.
 from beanbuff.tastyworks.tastyutils import ToDecimal
+from beanbuff.ameritrade import thinkorswim_utils as utils
 
 
 Table = petl.Table
@@ -255,13 +256,10 @@ def FoldInstrument(table: Table) -> Table:
 def GetPositions(filename: str) -> Table:
     """Read and parse the positions statement."""
 
+
     # Read the positions table.
     with open(filename) as csvfile:
         lines = csvfile.readlines()
-
-    match = re.search(r'Position Statement for (\d+)', lines[0])
-    assert match, "Missing account name from position statement: '{}'".format(lines[0])
-    account = match.group(1)
 
     # Prepare tables for aggregation, inserting groups and stripping subtables
     # (no reason to treat Equities and Futures distinctly).
@@ -275,6 +273,8 @@ def GetPositions(filename: str) -> Table:
                   .addfield('group', x.name, index=0))
         tables.append(gtable)
 
+    # Add the account number.
+    account = utils.GetAccountNumber(filename)
     table = (petl.cat(*tables)
              .addfield('account', account, index=0))
 

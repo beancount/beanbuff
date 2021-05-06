@@ -8,20 +8,19 @@
 
   $(document).ready(function() {
       var config = {
-          pageLength: 100,
-          select: 'single',
+          pageLength: 2000,
           fixedHeader: true,
           colReorder: true,
       };
-      var table = $('#chain').DataTable(config);
+      var table = $('#positions').DataTable(config);
   });
 
 </script>
 </head>
 
 <body>
-{{ navigation }}
-<h1>Chain Detail: {{ chain_id }}</h1>
+{% include 'navigation.html' %}
+<h1>Positions</h1>
 {{ table|safe }}
 <body>
 

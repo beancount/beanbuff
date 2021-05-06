@@ -53,6 +53,7 @@ from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
+from beanbuff.ameritrade import thinkorswim_utils as utils
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.data import beantxns
@@ -874,7 +875,7 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
     # Add some more missing columns.
     txns = (txns
             # Add the account number to the table.
-            .addfield('account', GetAccountNumber(filename), index=0)
+            .addfield('account', utils.GetAccountNumber(filename), index=0)
 
             # Make up a transaction id. It's a real bummer that the one that's
             # available in the API does not show up anywhere in this file.
@@ -902,16 +903,6 @@ def GetTransactionId(rec: Record) -> str:
     md5.update(str(rec['order_id']).encode('ascii'))
     md5.update(rec['description'].encode('ascii'))
     return "^{}".format(md5.hexdigest())
-
-
-def GetAccountNumber(filename: str) -> str:
-    """Get the account number."""
-    with open(filename, encoding='utf8') as infile:
-        line = infile.readline()
-        # Note: There is a BOM in the front of the file.
-        match = re.search(r"Account Statement for (\d+)", line)
-        assert match, "Could not find account in {}".format(line)
-        return match.group(1)
 
 
 def PrepareTables(filename: str) -> Dict[str, Table]:
