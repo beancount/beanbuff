@@ -153,15 +153,15 @@ def ReconcilePairsOrderIds(table: Table, threshold: int) -> Table:
     table = (
         table
         .sort('order_id')
-        .addfield('adj_order_id', partial(AdjustedOrder, [None]))
+        .addfield('pair_id', partial(AdjustedOrder, [None]))
         .addfield('order_diff',
-                  lambda r: ((r.order_id - r.adj_order_id)
-                             if (r.order_id != r.adj_order_id)
+                  lambda r: ((r.order_id - r.pair_id)
+                             if (r.order_id != r.pair_id)
                              else '')))
 
     if 0:
         # Debug print.
-        for order_id, group in table.aggregate('adj_order_id', list).records():
+        for order_id, group in table.aggregate('pair_id', list).records():
             if len(set(rec.order_id for rec in group)) > 1:
                 print(petl.wrap(chain([table.header()], group)).lookallstr())
 
@@ -180,7 +180,7 @@ def ProcessTradeHistory(equities_cash: Table,
     software, it doesn't get exported.)
     """
 
-    # Fix up order ids for pairs trades.
+    # Fix up order ids to join pairs trades.
     trade_hist = ReconcilePairsOrderIds(trade_hist, 5)
 
     # We want to pair up the trades from the equities and futures statements
@@ -296,6 +296,7 @@ def FindMultiplierInDescription(string: str) -> Decimal:
 
 _TXN_FIELDS = ('datetime',
                'order_id',
+               'pair_id',
                'rowtype',
                'instruction',
                'effect',
@@ -375,7 +376,8 @@ def SplitGroupsToTransactions(groups: List[Group],
                             if len(trade_rows) > 1
                             else description)
                 txn = (trow.exec_time,
-                       trow.adj_order_id,
+                       trow.order_id,
+                       trow.pair_id,
                        'Trade',
                        trow.side,
                        trow.pos_effect,
