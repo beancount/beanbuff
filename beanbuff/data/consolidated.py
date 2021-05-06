@@ -110,14 +110,14 @@ def TransactionsToChains(transactions: Table) -> Table:
          .rename('cost', 'accr')),
         (mark
          .cut('chain_id', 'cost', 'net_liq', 'pnl_day')
-         .addfield('active', True)), key='chain_id')
+         .addfield('status', 'ACTIVE')), key='chain_id')
 
     # Finalize the table, filling in missing values and adding per-chain fields.
     chains = (
         chains
         .replace('cost', None, ZERO)
         .convert('cost', lambda v: -v)
-        .replace('active', None, False)
+        .replace('status', None, 'DONE')
         .addfield('days', lambda r: (r.maxdate - r.mindate).days)
         .addfield('chain_name', ChainName)
         .convert('mindate', lambda v: v.date())
@@ -133,7 +133,7 @@ def FormatActiveChains(chains: Table) -> Table:
     # Clean up and format the table a bit.
     chains = (
         chains
-        .cut('chain_name', 'chain_id', 'account', 'active',
+        .cut('chain_name', 'chain_id', 'account', 'status',
              'underlying', 'mindate', 'maxdate',
              'init', 'accr', 'cost', 'commissions', 'fees',
              'days',
@@ -390,7 +390,7 @@ def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: 
     # Remove inactive chains if requested.
     if not inactive:
         chains = (chains
-                        .selecteq('active', True))
+                  .selecteq('status', 'ACTIVE'))
 
     # Output the table.
     print(chains.lookallstr())
