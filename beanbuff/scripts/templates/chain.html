@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+
+{% include 'head.html' %}
+
+<head>
+<script>
+
+  $(document).ready(function() {
+      var config = {
+          pageLength: 100,
+          select: 'single',
+          fixedHeader: true,
+          colReorder: true,
+      };
+      var table = $('#chain').DataTable(config);
+  });
+
+</script>
+</head>
+
+<body>
+<h1>Chain Detail: {{ chain_id }}</h1>
+{{ table|safe }}
+<body>
+
+</html>

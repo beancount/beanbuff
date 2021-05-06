@@ -154,18 +154,11 @@ def _CreateChainId(transaction_id: str, _: datetime.datetime) -> str:
     """Create a unique match id from the given transaction id."""
     md5 = hashlib.blake2s(digest_size=4)
     md5.update(transaction_id.encode('ascii'))
-    return ">{}".format(md5.hexdigest())
+    return "{}".format(md5.hexdigest())
 
 
-def RenderChain(transactions: Table, chain_id):
+def RenderChain(transactions: Table, chain_id: str):
     """Render a chain in a nice readable way."""
-
-    chain_txns = (transactions
-                  .selecteq('chain_id', chain_id))
-
-    print(chain_txns.lookallstr())
-    # for rec in chain_txns.records():
-    #     print(rec)
 
 
 

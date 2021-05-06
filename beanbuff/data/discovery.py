@@ -26,6 +26,8 @@ def FindFiles(fileordirs: List[str],
     # If input is empty, use the CWD.
     if not fileordirs:
         fileordirs = [os.getcwd()]
+    elif isinstance(fileordirs, str):
+        fileordirs = [fileordirs]
 
     # Find all the files for each account.
     byaccount = collections.defaultdict(list)

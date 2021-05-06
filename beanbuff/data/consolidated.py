@@ -133,7 +133,7 @@ def FormatActiveChains(chains: Table) -> Table:
     # Clean up and format the table a bit.
     chains = (
         chains
-        .cut('account', 'chain_name', 'chain_id', 'active',
+        .cut('chain_name', 'chain_id', 'account', 'active',
              'underlying', 'mindate', 'maxdate',
              'init', 'accr', 'cost', 'commissions', 'fees',
              'days',
@@ -156,8 +156,6 @@ def FormatActiveChains(chains: Table) -> Table:
         .addfield('accr_tgtwin', lambda r: ShortNum(r.accr * WIN_FRAC))
         .addfield('accr_tgtloss', lambda r: ShortNum(r.accr * WIN_FRAC * LoseFrac(r.p50))))
 
-    chains = chains.addfield('---', '')
-
     # Add Net Liq columns.
     chains = (
         chains
@@ -167,14 +165,9 @@ def FormatActiveChains(chains: Table) -> Table:
         .addfield('nl/loss', lambda r: ShortNum(-r.accr + r.tgtloss))
         .addfield('nla/loss', lambda r: ShortNum(-r.accr + r.accr_tgtloss)))
 
-    chains = chains.addfield('---', '')
-
     chains = (
         chains
 
-        # Replicate some of the rows for proximity and reading convenience.
-        .addfield('init_cr', lambda r: r.init)
-        .addfield('accr_cr', lambda r: r.accr)
         .addfield('net_liq', lambda r: r.net_liq)
         .cutout('net_liq')
 
@@ -182,7 +175,6 @@ def FormatActiveChains(chains: Table) -> Table:
         .addfield('tgtinit%', PercentTargetInitial)
         .addfield('tgtaccr%', PercentTargetAccrued)
 
-        .addfield('---', '')
         .addfield('pnl_day', lambda r: r.pnl_day)
         .cutout('pnl_day')
         )
@@ -275,7 +267,7 @@ TABLE
 </html>
 """
 
-def ToHtml(table: Table, filename: str):
+def ToHtmlString(table: Table):
     table = (table
              .cutout('---')
              .cutout('---')
@@ -284,9 +276,14 @@ def ToHtml(table: Table, filename: str):
     table.tohtml(sink)
     html = sink.getvalue().decode('utf8')
     html = re.sub("class='petl'", "class='display compact cell-border' id='positions'", html)
-    final = _TEMPLATE.replace('TABLE', html)
+    return html
+
+
+def ToHtml(table: Table, filename: str):
+    html = ToHtmlString(table)
+    _TEMPLATE.replace('TABLE', html)
     with open(filename, 'w') as ofile:
-        print(final, file=ofile)
+        print(html, file=ofile)
 
 
 def GetOrderIdsFromLedger(filename: str) -> Set[str]:
@@ -357,7 +354,9 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
             .rename('p_net_liq', 'net_liq')
             .rename('p_cost', 'pos_cost')
             .rename('p_pnl_open', 'pnl_open')
-            .rename('p_pnl_day', 'pnl_day'))
+            .rename('p_pnl_day', 'pnl_day')
+
+            .cutout('p_group', 'p_quantity', 'p_price', 'p_mark', 'pos_cost'))
     else:
         # Add columns that would be necessary from the positions table.
         transactions = (transactions
@@ -368,7 +367,9 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
     chains = TransactionsToChains(transactions)
 
     # Clean up the chains and add targets.
-    return FormatActiveChains(chains)
+    chains = FormatActiveChains(chains)
+
+    return transactions, positions, chains
 
 
 @click.command()

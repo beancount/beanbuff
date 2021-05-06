@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+
+{% include 'head.html' %}
+
+<head>
+<script>
+
+  $(document).ready(function() {
+      var config = {
+          pageLength: 200,
+          select: 'single',
+          fixedHeader: true,
+          colReorder: true,
+          // dom: 'Bfrtip',
+          // buttons: ['copy', 'excel', 'pdf'],
+      };
+      var table = $('#chains').DataTable(config);
+
+      // When the Chain button is pressed, go to the chain detail page.
+      $('#chain').click( function () {
+          chain_name = table.row('.selected').data()[1]
+          window.location.href = `/chain/${chain_name}`;
+      } );
+
+      $(document).keypress(function(ev) {
+          var search = $(".dataTables_filter input");
+          if (ev.which == 47 && ev.key == '/')  {
+              if (!search.is(":focus")) {
+                  event.preventDefault();
+                  search.focus();
+              }
+          }
+      });
+
+      // TODO(blais): Remove - tried to install double-click.
+      // $('#chain tbody').on('dblclick', 'tr', function () {
+      //     var data = table.row( this ).data();
+      //     alert( 'You clicked on '+data[0]+'\'s row' );
+      // } );
+  });
+
+</script>
+</head>
+
+<body>
+<button id="chain">Chain Detail</button>
+{{ table|safe }}
+<body>
+
+</html>
