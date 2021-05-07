@@ -8,27 +8,26 @@
 
   $(document).ready(function() {
       var config = {
-          pageLength: 100,
-          select: 'single',
+          pageLength: 2000,
           fixedHeader: true,
           colReorder: true,
       };
-      var table = $('#chain').DataTable(config);
+      var table = $('#summary').DataTable(config);
       InstallDataTableFocus();
   });
 
 </script>
+<style>
+  table#summary {
+      width: 50%;
+  }
+</style>
+
 </head>
 
 <body>
 {% include 'navigation.html' %}
-<h1>Chain Detail: {{ chain_id }}</h1>
-
-<div id="chain_history">
-{{ history|safe }}
-</div>
-
-
+<h1>Summary</h1>
 {{ table|safe }}
 <body>
 

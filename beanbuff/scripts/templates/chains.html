@@ -9,8 +9,8 @@
   $(document).ready(function() {
       var config = {
           pageLength: 200,
-          select: true,
-          // select: 'multi+shift',
+          // select: true,
+          select: 'multi+shift',
           fixedHeader: true,
           colReorder: true,
           // dom: 'Bfrtip',
@@ -18,20 +18,20 @@
       };
       var table = $('#chains').DataTable(config);
 
+      InstallDataTableFocus();
+
+
       // TODO(blais): Remove, this was replaced with a link.
-      // // When the Chain button is pressed, go to the chain detail page.
-      // $('#chain').click( function () {
-      //     chain_name = table.row('.selected').data()[1]
-      //     window.location.href = `/chain/${chain_name}`;
-      // } );
+      // When the Clear button is pressed, clear the selection.
+      $('#clear').click( function () {
+          table.rows('.selected').deselect();
+      } );
 
-      SetDataTableFocus();
-
-      // TODO(blais): Remove - tried to install double-click.
-      // $('#chain tbody').on('dblclick', 'tr', function () {
-      //     var data = table.row( this ).data();
-      //     alert( 'You clicked on '+data[0]+'\'s row' );
-      // } );
+      // Redirect with a list of the selected chains.
+      $('#summarize').click( function () {
+          var ids = table.rows('.selected').ids().join(",");
+          window.location.href = `/summarize?chain_ids=${ids}`;
+      } );
   });
 
 </script>
@@ -39,7 +39,8 @@
 
 <body>
 {% include 'navigation.html' %}
-<!-- <button id="chain">Chain Detail</button> -->
+<button id="clear">Clear</button>
+<button id="summarize">Summarize</button>
 
 {{ table|safe }}
 <body>

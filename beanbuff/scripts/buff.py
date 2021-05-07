@@ -2,20 +2,24 @@
 """Web application for all the files.
 """
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Iterator, Iterable, Set, NamedTuple
-
+from decimal import Decimal
 from functools import partial
 from os import path
-import os
-import threading
-import re
+from typing import Any, Callable, Dict, List, Optional, Tuple, Iterator, Iterable, Set, NamedTuple
 import io
+import itertools
+import os
+import re
+import threading
 
 import click
 import flask
 
 from beanbuff.data import consolidated
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
+
+
+ZERO = Decimal(0)
 
 
 approot = path.dirname(__file__)
@@ -52,11 +56,14 @@ _STATE_LOCK = threading.Lock()
 app.before_first_request(initialize)
 
 
-def ToHtmlString(table: Table, cls: str):
+def ToHtmlString(table: Table, cls: str, ids: List[str] = None):
     sink = petl.MemorySource()
     table.tohtml(sink)
     html = sink.getvalue().decode('utf8')
     html = re.sub("class='petl'", f"class='display compact cell-border' id='{cls}'", html)
+    if ids:
+        iter_ids = itertools.chain([''], iter(ids))
+        html = re.sub('<tr>', lambda _: '<tr id="{}">'.format(next(iter_ids)), html)
     return html
 
 
@@ -82,11 +89,12 @@ def home():
 
 @app.route('/chains')
 def chains():
+    ids = STATE.chains.values('chain_id')
     table = (STATE.chains
              .convert('chain_id', partial(AddUrl, 'chain', 'chain_id')))
     return flask.render_template(
         'chains.html',
-        table=ToHtmlString(table, 'chains'),
+        table=ToHtmlString(table, 'chains', ids),
         **GetNavigation())
 
 
@@ -97,9 +105,22 @@ def chain(chain_id: str):
 
     clean_txns = (txns
                   .sort(['datetime', 'strike'])
-                  .cut('datetime', 'description', 'cost'))
+                  .cut('datetime', 'description', 'strike', 'cost'))
+
+    print(clean_txns.lookallstr())
+
+    strikes = {strike for strike in clean_txns.values('strike') if strike is not None}
+    min_strike = min(strikes)
+    max_strike = max(strikes)
+    diff_strike = (max_strike - min_strike)
+    if diff_strike == 0:
+        diff_strike = 1
+    min_x = 0
+    max_x = 1000
+    width = 1000
 
     svg = io.StringIO()
+    pr = partial(print, file=svg)
     if 0:
         prev_time = None
         for rec in clean_txns.records():
@@ -108,11 +129,47 @@ def chain(chain_id: str):
             print(rec, file=svg)
             prev_time = rec.datetime
     else:
-        print('''
-            <svg width="100" height="100">
-              <circle cx="50" cy="50" r="40" stroke="green" stroke-width="4" fill="yellow" />
-            </svg>
-        ''', file=svg)
+        pr(f'<svg viewBox="-150 0 1300 1500" xmlns="http://www.w3.org/2000/svg">')
+        pr('<style>')
+        pr('''
+                .small { font-size: 7px; }
+                .normal { font-size: 9px; }
+        ''')
+
+
+        #         /* Note that the color of the text is set with the    *
+        #          * fill property, the color property is for HTML only */
+        #         .Rrrrr { font: italic 40px serif; fill: red; }
+
+        # pr('''
+        #       <text x="20" y="35" class="small">My</text>
+        #       <text x="40" y="35" class="heavy">cat</text>
+        #       <text x="55" y="55" class="small">is</text>
+        #       <text x="65" y="55" class="Rrrrr">Grumpy!</text>
+        # ''')
+
+        pr('</style>')
+
+        pr(f'<line x1="0" y1="4" x2="1000" y2="4" style="stroke:#cccccc;stroke-width:0.5" />')
+        for strike in sorted(strikes):
+            x = int((strike - min_strike) / diff_strike * width)
+            pr(f'<line x1="{x}" y1="2" x2="{x}" y2="6" style="stroke:#333333;stroke-width:0.5" />')
+            pr(f'<text text-anchor="middle" x="{x}" y="12" class="small">{strike}</text>')
+        pr()
+
+        y = 20
+        prev_time = None
+        for r in clean_txns.sort('datetime').records():
+            if prev_time is not None and prev_time != r.datetime:
+                y += 30
+            # print(rec, file=svg)
+            prev_time = r.datetime
+
+            x = int((r.strike - min_strike) / diff_strike * width)
+            pr(f'<text text-anchor="middle" x="{x}" y="{y}" class="normal">{r.description}</text>')
+            y += 12
+
+        pr('</svg>')
 
     return flask.render_template(
         'chain.html',
@@ -161,4 +218,30 @@ def monitor():
     ## TODO(blais):
     return flask.render_template(
         'monitor.html',
+        **GetNavigation())
+
+
+@app.route('/summarize')
+def summarize():
+    # Filter down the list of chains.
+    selected_chain_ids = flask.request.args.get('chain_ids')
+    if selected_chain_ids:
+        selected_chain_ids = selected_chain_ids.split(',')
+
+    chains = (STATE.chains
+              .selectin('chain_id', selected_chain_ids)
+              .addfield('pnl', lambda r: r.accr + (r.net_liq or ZERO))
+              .cut('underlying', 'mindate', 'days', 'init', 'pnl'))
+
+    # Add bottom line totals.
+    totals = (chains
+              .cut('init', 'pnl')
+              .aggregate(None, {'init': ('init', sum),
+                                'pnl': ('pnl', sum)})
+              .addfield('underlying', '__TOTAL__'))
+    chains = petl.cat(chains, totals)
+
+    return flask.render_template(
+        'summary.html',
+        table=ToHtmlString(chains, 'summary'),
         **GetNavigation())
