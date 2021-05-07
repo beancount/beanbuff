@@ -125,7 +125,7 @@ def chain(chain_id: str):
 @app.route('/transactions')
 def transactions():
     table = (STATE.transactions
-             .convert('chain_id', lambda r: flask.url_for('chain', r.chain_id)))
+             .convert('chain_id', lambda v: flask.url_for('chain', chain_id=v)))
     return flask.render_template(
         'transactions.html',
         table=ToHtmlString(table, 'transactions'),

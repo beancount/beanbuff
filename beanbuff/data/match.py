@@ -15,7 +15,7 @@ import collections
 import itertools
 import hashlib
 from decimal import Decimal
-from typing import Dict, Tuple, NamedTuple, Optional
+from typing import Any, Dict, Tuple, Mapping, NamedTuple, Optional
 
 from beanbuff.data.etl import petl, Table, Record
 
@@ -42,7 +42,44 @@ def Match(transactions: Table) -> Dict[str, str]:
     a mapping of (transaction-id, match-id). Each `match-id` will be a stable
     unique identifier across runs.
     """
+
     # Create a mapping of transaction ids to matches.
+    invs, match_map, expire_map = _CreateMatchMappings(transactions)
+
+    # Insert Mark rows to close out the positions virtually.
+    closing_transactions = _CreateClosingTransactions(invs, match_map)
+
+    def ExpiredQuantity(_, r: Record) -> Decimal:
+        "Set quantity by expired quantity."
+        if r.rowtype == 'Expire':
+            quantity = expire_map.get(r.transaction_id, None)
+            if quantity is not None and r.quantity and r.quantity != abs(quantity):
+                raise ValueError("Invalid expiration quantity for row: "
+                                 "{} != {} from {}".format(r.quantity, abs(quantity), r))
+        else:
+            quantity = r.quantity
+        return quantity
+
+    def ExpiredInstruction(_, r: Record) -> Decimal:
+        "Set quantity by expired quantity."
+        if not r.instruction and r.rowtype == 'Expire':
+            quantity = expire_map.get(r.transaction_id, None)
+            if quantity is not None:
+                return 'SELL' if quantity < ZERO else 'BUY'
+        return r.instruction
+
+    # Apply the mapping to the table.
+    matched_transactions = (
+        petl.cat(transactions, closing_transactions)
+        .convert('quantity', ExpiredQuantity, pass_row=True)
+        .convert('instruction', ExpiredInstruction, pass_row=True)
+        .addfield('match_id', lambda r: match_map[r.transaction_id]))
+
+    return matched_transactions
+
+
+def _CreateMatchMappings(transactions: Table):
+    """Create a mapping of transaction ids to matches."""
     invs = collections.defaultdict(FifoInventory)
     match_map = {}
     expire_map = {}
@@ -66,57 +103,53 @@ def Match(transactions: Table) -> Dict[str, str]:
         if match_id:
             match_map[rec.transaction_id] = match_id
 
-    # Insert Mark rows to close out the positions virtually.
+    inventories = {key: inv.position() for key, inv in invs.items()}
+    return inventories, match_map, expire_map
+
+
+def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str]) -> Table:
+    """Create synthetic expiration and mark transactions to close matches."""
     closing_transactions = [
         ('account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
          'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
-         'effect', 'instruction', 'quantity', 'cost')
+         'effect', 'instruction', 'quantity', 'cost', 'description')
     ]
-    idgen = iter(itertools.count(start=1))
+    mark_ids = iter(itertools.count(start=1))
+    expire_ids = iter(itertools.count(start=1))
     dt_mark = datetime.datetime.now().replace(microsecond=0)
-    for key, inv in invs.items():
-        quantity, basis, match_id = inv.position()
-        if quantity != ZERO:
-            (account, instype, underlying, expiration, expcode, putcall,
-             strike, multiplier) = instrument_key
-            mark_id = next(idgen)
-            transaction_id = "^mark{:06d}".format(mark_id)
-            order_id = "o{:06d}".format(mark_id)
-            instruction = 'BUY' if quantity < ZERO else 'SELL'
-            sign = -1 if quantity < ZERO else 1
-            closing_transactions.append(
-                (key.account, transaction_id, 'Mark', dt_mark, order_id,
-                 key.instype, key.underlying, key.expiration, key.expcode, key.putcall,
-                 key.strike, key.multiplier,
-                 'CLOSING', instruction, abs(quantity), sign * basis))
-            match_map[transaction_id] = match_id
+    dt_today = dt_mark.date()
+    for key, (quantity, basis, match_id) in invs.items():
+        if quantity == ZERO:
+            continue
+        (account, instype, underlying, expiration, expcode, putcall,
+         strike, multiplier) = key
 
-    def ExpiredQuantity(_, r: Record) -> Decimal:
-        "Set quantity by expired quantity."
-        if r.rowtype == 'Expire':
-            quantity = abs(expire_map[r.transaction_id])
-            if r.quantity and r.quantity != quantity:
-                raise ValueError("Invalid expiration quantity for row: "
-                                 "{} != {} from {}".format(r.quantity, quantity, r))
+        # Check for expired positions.
+        if expiration is not None and expiration < dt_today:
+            # Sometimes transactions logs do not include expiration messages,
+            # and so we synthesize the expirations here if necessary.
+            expire_id = next(expire_ids)
+            transaction_id = "^expire{:06d}".format(expire_id)
+            rowtype = 'Expire'
+            description = "Synthetic expiration of option"
         else:
-            quantity = r.quantity
-        return quantity
+            # This is an existing position; insert a mark.
+            mark_id = next(mark_ids)
+            transaction_id = "^mark{:06d}".format(mark_id)
+            rowtype = 'Mark'
+            description = "Mark-to-market of open position"
 
-    def ExpiredInstruction(_, r: Record) -> Decimal:
-        "Set quantity by expired quantity."
-        if r.rowtype == 'Expire':
-            quantity = expire_map[r.transaction_id]
-            return 'SELL' if quantity < ZERO else 'BUY'
-        return r.instruction
+        # Insert a closing transaction.
+        instruction = 'BUY' if quantity < ZERO else 'SELL'
+        sign = -1 if quantity < ZERO else 1
+        closing_transactions.append(
+            (key.account, transaction_id, rowtype, dt_mark, None,
+             key.instype, key.underlying, key.expiration, key.expcode, key.putcall,
+             key.strike, key.multiplier,
+             'CLOSING', instruction, abs(quantity), sign * basis, description))
+        match_map[transaction_id] = match_id
 
-    # Apply the mapping to the table.
-    matched_transactions = (
-        petl.cat(transactions, petl.wrap(closing_transactions))
-        .convert('quantity', ExpiredQuantity, pass_row=True)
-        .convert('instruction', ExpiredInstruction, pass_row=True)
-        .addfield('match_id', lambda r: match_map[r.transaction_id]))
-
-    return matched_transactions
+    return petl.wrap(closing_transactions)
 
 
 def _CreateMatchId(transaction_id: str) -> str:

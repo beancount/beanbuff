@@ -57,15 +57,15 @@ def ChainName(rec: Record) -> str:
 
 def InitialCredits(pairs: Iterator[Tuple[str, Decimal]]) -> Decimal:
     """Compute the initial credits from a group of chain rows."""
-    sum_order_id = None
-    sum_first_order = ZERO
+    first_order_id = None
+    first_order_sum = ZERO
     for order_id, cost in pairs:
-        if sum_order_id is None or order_id < sum_order_id:
-            sum_order_id = order_id
-            sum_first_order = cost
-        elif order_id == sum_order_id:
-            sum_first_order += cost
-    return sum_first_order
+        if first_order_id is None or order_id is None or order_id < first_order_id:
+            first_order_id = order_id
+            first_order_sum = cost
+        elif order_id == first_order_id:
+            first_order_sum += cost
+    return first_order_sum
 
 
 def OptSum(numbers: Iterable[Optional[Decimal]]) -> Decimal:
@@ -385,7 +385,7 @@ def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: 
     logging.basicConfig(level=logging.INFO, format='%(levelname)-8s: %(message)s')
 
     # Read in and consolidate all the data.
-    chains = ConsolidateChains(fileordirs, ledger)
+    _, __, chains = ConsolidateChains(fileordirs, ledger)
 
     # Remove inactive chains if requested.
     if not inactive:
