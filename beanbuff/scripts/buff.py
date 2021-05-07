@@ -12,6 +12,12 @@ import os
 import re
 import threading
 
+import numpy as np
+from matplotlib import pyplot
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+
 import click
 import flask
 
@@ -20,6 +26,7 @@ from beanbuff.data.etl import petl, Table, Record, WrapRecords
 
 
 ZERO = Decimal(0)
+Q = Decimal('0.01')
 
 
 approot = path.dirname(__file__)
@@ -56,7 +63,7 @@ _STATE_LOCK = threading.Lock()
 app.before_first_request(initialize)
 
 
-def ToHtmlString(table: Table, cls: str, ids: List[str] = None):
+def ToHtmlString(table: Table, cls: str, ids: List[str] = None) -> bytes:
     sink = petl.MemorySource()
     table.tohtml(sink)
     html = sink.getvalue().decode('utf8')
@@ -74,6 +81,7 @@ def GetNavigation() -> Dict[str, str]:
         'transactions': flask.url_for('transactions'),
         'positions': flask.url_for('positions'),
         'risk': flask.url_for('risk'),
+        'stats': flask.url_for('stats'),
     }
 
 
@@ -81,6 +89,37 @@ def AddUrl(endpoint: str, kwdarg: str, value: Any) -> str:
     kwds = {kwdarg: value}
     return '<a href={}>{}</a>'.format(flask.url_for(endpoint, **kwds), value)
 
+
+def FilterChains(table: Table) -> Table:
+    """Filter down the list of chains from the params."""
+    selected_chain_ids = flask.request.args.get('chain_ids')
+    if selected_chain_ids:
+        selected_chain_ids = selected_chain_ids.split(',')
+        table = table.selectin('chain_id', selected_chain_ids)
+    return table
+
+
+# TODO(blais): Remove threshold, exclude non-trades from input.
+def RatioDistribution(num, denom, threshold=1000):
+    """Compute a P/L percent distribution."""
+    mask = denom > 1e-6
+    num, denom = num[mask], denom[mask]
+    mask = (num < threshold) & (num > -threshold)
+    num, denom = num[mask], denom[mask]
+    return num/denom * 100
+
+
+def RenderHistogram(data: np.array, title: str) -> bytes:
+    fig, ax = pyplot.subplots()
+    ax.set_title(title)
+    ax.hist(data, bins='fd', edgecolor='black', linewidth=0.5)
+    buf = io.BytesIO()
+    FigureCanvas(fig).print_png(buf)
+    return buf.getvalue()
+
+
+#-------------------------------------------------------------------------------
+# Handlers.
 
 @app.route('/')
 def home():
@@ -102,12 +141,9 @@ def chains():
 def chain(chain_id: str):
     txns = (STATE.transactions
             .selecteq('chain_id', chain_id))
-
     clean_txns = (txns
                   .sort(['datetime', 'strike'])
                   .cut('datetime', 'description', 'strike', 'cost'))
-
-    print(clean_txns.lookallstr())
 
     strikes = {strike for strike in clean_txns.values('strike') if strike is not None}
     min_strike = min(strikes)
@@ -135,21 +171,9 @@ def chain(chain_id: str):
                 .small { font-size: 7px; }
                 .normal { font-size: 9px; }
         ''')
-
-
-        #         /* Note that the color of the text is set with the    *
-        #          * fill property, the color property is for HTML only */
-        #         .Rrrrr { font: italic 40px serif; fill: red; }
-
-        # pr('''
-        #       <text x="20" y="35" class="small">My</text>
-        #       <text x="40" y="35" class="heavy">cat</text>
-        #       <text x="55" y="55" class="small">is</text>
-        #       <text x="65" y="55" class="Rrrrr">Grumpy!</text>
-        # ''')
-
         pr('</style>')
 
+        # TODO(blais): Render this better, it's ugly.
         pr(f'<line x1="0" y1="4" x2="1000" y2="4" style="stroke:#cccccc;stroke-width:0.5" />')
         for strike in sorted(strikes):
             x = int((strike - min_strike) / diff_strike * width)
@@ -205,12 +229,53 @@ def risk():
         **GetNavigation())
 
 
-@app.route('/stats')
+@app.route('/stats/')
 def stats():
-    ## TODO(blais):
+    # Compute stats on winners and losers.
+    chains = FilterChains(STATE.chains)
+    win, los = chains.biselect(lambda r: r.chain_pnl > 0)
+    pnl_win = np.array(win.values('chain_pnl'))
+    pnl_los = np.array(los.values('chain_pnl'))
+
+    def Quantize(value):
+        return Decimal(value).quantize(Q)
+    rows = [
+        ['Description', 'Wins', 'Losses'],
+        ['Number', len(pnl_win), len(pnl_los)],
+        ['Average$', Quantize(np.mean(pnl_win)), -Quantize(np.mean(pnl_los))],
+        ['Total$', Quantize(np.sum(pnl_win)), -Quantize(np.sum(pnl_los))],
+    ]
+    Qratio = Decimal('0.1')
+    stats_table = (
+        petl.wrap(rows)
+        .addfield('Ratio', lambda r: Decimal(r.Wins/r.Losses).quantize(Qratio)))
+
+    chain_ids = flask.request.args.get('chain_ids')
     return flask.render_template(
         'stats.html',
+        stats_table=ToHtmlString(stats_table, 'stats'),
+        pnlhist=flask.url_for('stats_pnlhist', chain_ids=chain_ids),
+        pnlpctinit=flask.url_for('stats_pnlpctinit', chain_ids=chain_ids),
         **GetNavigation())
+
+
+@app.route('/stats/pnlhist')
+def stats_pnlhist():
+    chains = FilterChains(STATE.chains)
+    pnl = np.array(chains.values('chain_pnl'))
+    pnl = [v for v in pnl if -10000 < v < 10000]
+    image = RenderHistogram(pnl, "P/L$")
+    return flask.Response(image, mimetype='image/png')
+
+
+@app.route('/stats/pnlpctinit')
+def stats_pnlpctinit():
+    chains = FilterChains(STATE.chains)
+    pnl = np.array(chains.values('chain_pnl')).astype(float)
+    creds = np.array(chains.values('init')).astype(float)
+    data = RatioDistribution(pnl, creds)
+    image = RenderHistogram(data, "P/L% Initial Credits")
+    return flask.Response(image, mimetype='image/png')
 
 
 @app.route('/monitor')
@@ -224,20 +289,14 @@ def monitor():
 @app.route('/summarize')
 def summarize():
     # Filter down the list of chains.
-    selected_chain_ids = flask.request.args.get('chain_ids')
-    if selected_chain_ids:
-        selected_chain_ids = selected_chain_ids.split(',')
-
-    chains = (STATE.chains
-              .selectin('chain_id', selected_chain_ids)
-              .addfield('pnl', lambda r: r.accr + (r.net_liq or ZERO))
-              .cut('underlying', 'mindate', 'days', 'init', 'pnl'))
+    chains = (FilterChains(STATE.chains)
+              .cut('underlying', 'mindate', 'days', 'init', 'chain_pnl'))
 
     # Add bottom line totals.
     totals = (chains
-              .cut('init', 'pnl')
+              .cut('init', 'chain_pnl')
               .aggregate(None, {'init': ('init', sum),
-                                'pnl': ('pnl', sum)})
+                                'chain_pnl': ('chain_pnl', sum)})
               .addfield('underlying', '__TOTAL__'))
     chains = petl.cat(chains, totals)
 
