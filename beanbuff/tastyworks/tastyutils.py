@@ -43,7 +43,7 @@ def ToDecimal(string: str) -> Decimal:
         string = match.group(1)
 
     # 64'ths.
-    match = re.match(r'([-+]?\d+)"(\d+)', string)
+    match = re.match(r"([-+]?\d+)(?:\"|'')(\d+)", string)
     if match:
         integral, s64th = match.groups()
         if len(s64th) > 3:
