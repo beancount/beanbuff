@@ -41,10 +41,10 @@ import click
 import petl
 petl.config.look_style = 'minimal'
 
+from johnny.base.numbers import ToDecimal
 from beanbuff.data import beansym
 from beanbuff.data import futures
 # TODO(blais): Move this to a common location.
-from beanbuff.tastyworks.tastyutils import ToDecimal
 from beanbuff.ameritrade import thinkorswim_utils as utils
 
 

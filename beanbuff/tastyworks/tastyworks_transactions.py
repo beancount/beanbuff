@@ -21,10 +21,10 @@ import os
 import click
 from dateutil import parser
 
+from johnny.base.numbers import ToDecimal
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.tastyworks import tastysyms
-from beanbuff.tastyworks.tastyutils import ToDecimal
 
 
 ZERO = Decimal(0)
