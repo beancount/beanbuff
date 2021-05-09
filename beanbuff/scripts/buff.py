@@ -43,7 +43,7 @@ class State(NamedTuple):
     chains: Table
 
 
-def initialize():
+def Initialize():
     directory = os.getenv("HOME")
     fileordirs: str = [path.join(directory, fn)
                        for fn in os.listdir(directory)
@@ -60,7 +60,7 @@ def initialize():
 
 STATE = None
 _STATE_LOCK = threading.Lock()
-app.before_first_request(initialize)
+app.before_first_request(Initialize)
 
 
 def ToHtmlString(table: Table, cls: str, ids: List[str] = None) -> bytes:
@@ -86,8 +86,11 @@ def GetNavigation() -> Dict[str, str]:
 
 
 def AddUrl(endpoint: str, kwdarg: str, value: Any) -> str:
-    kwds = {kwdarg: value}
-    return '<a href={}>{}</a>'.format(flask.url_for(endpoint, **kwds), value)
+    if value is not None:
+        url = flask.url_for(endpoint, **{kwdarg: value})
+        return '<a href={}>{}</a>'.format(url, value)
+    else:
+        return value
 
 
 def FilterChains(table: Table) -> Table:
@@ -146,6 +149,8 @@ def chain(chain_id: str):
                   .cut('datetime', 'description', 'strike', 'cost'))
 
     strikes = {strike for strike in clean_txns.values('strike') if strike is not None}
+    if not strikes:
+        return "No transactions."
     min_strike = min(strikes)
     max_strike = max(strikes)
     diff_strike = (max_strike - min_strike)
@@ -206,7 +211,7 @@ def chain(chain_id: str):
 @app.route('/transactions')
 def transactions():
     table = (STATE.transactions
-             .convert('chain_id', lambda v: flask.url_for('chain', chain_id=v)))
+             .convert('chain_id', partial(AddUrl, 'chain', 'chain_id')))
     return flask.render_template(
         'transactions.html',
         table=ToHtmlString(table, 'transactions'),
@@ -246,6 +251,8 @@ def stats():
         ['Total$', Quantize(np.sum(pnl_win)), -Quantize(np.sum(pnl_los))],
     ]
     Qratio = Decimal('0.1')
+    print(petl.wrap(rows).lookallstr())
+
     stats_table = (
         petl.wrap(rows)
         .addfield('Ratio', lambda r: Decimal(r.Wins/r.Losses).quantize(Qratio)))

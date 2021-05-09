@@ -35,3 +35,14 @@ tos:
 
 buff:
 	FLASK_ENV=development FLASK_APP=beanbuff.scripts.buff flask run
+
+tobean:
+	@python3 -m beanbuff.data.tobean $(HOME)/tobean.json $(L) $(HOME)/tasty*1887*.csv | tee $(HOME)/x1887.beancount
+	@python3 -m beanbuff.data.tobean $(HOME)/tobean.json $(L) $(HOME)/tasty*2003*.csv | tee $(HOME)/x2003.beancount
+	@python3 -m beanbuff.data.tobean $(HOME)/tobean.json $(L) $(HOME)/*Statement.csv | tee $(HOME)/x9627.beancount
+
+
+FILES=   # Your files.
+
+replace:
+	python3 scripts/translate_symbols_ameritrade.py $(L) $(FILES)

@@ -25,7 +25,6 @@ import sys
 import uuid
 import pprint
 
-import click
 from dateutil import parser
 
 import ameritrade
@@ -76,7 +75,6 @@ def GetLedgerTransactions(filename: str) -> List[data.Transaction]:
     account_re = 'Assets:US:Ameritrade:Main'
     min_date = datetime.date(2021, 1, 1)
     order_link_re = 'order-(T.*)'
-    filename = os.getenv('L')
 
     entries, _, options_map = loader.load_file(filename)
     for entry in data.filter_txns(entries):
@@ -90,7 +88,7 @@ def GetLedgerTransactions(filename: str) -> List[data.Transaction]:
         if any(re.match(order_link_re, link) for link in entry.links):
             continue
 
-        printer.print_entry(entry)
+        yield entry
 
 
 def main():
@@ -114,11 +112,12 @@ def main():
     start = parser.parse(args.start).date() if args.start else today.replace(month=1, day=1)
     end = parser.parse(args.end).date() if args.end else today
     table = FetchMapping(ameritrade.config_from_args(args), start, end)
-    #print(table.lookallstr())
+    #print(table.head(20).lookallstr())
 
     if args.ledger:
-        entries = GetLedgerTransactions(args.ledger)
-
+        # Print transations that don't have an order id.
+        for entry in GetLedgerTransactions(args.ledger):
+            printer.print_entry(entry)
 
 
 if __name__ == '__main__':

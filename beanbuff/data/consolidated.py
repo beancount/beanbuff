@@ -214,6 +214,7 @@ def LoseFrac(p: Decimal) -> Decimal:
     return -p / (1 - p)
 
 
+# TODO(blais): Move this to a common place.
 def SynthesizeSymbol(r: Record) -> str:
     """Remove the symbol columns and replace them by a single symbol."""
     return str(beansym.FromColumns(r.underlying,

@@ -28,6 +28,9 @@ MULTIPLIERS = {
     '/MYM'    : 0.5,
     'DJI'     : 100,
 
+    # Volatility
+    '/VX'     : 1000,
+
     # FX
     '/6E'     : 125_000,
     '/6J'     : 12_500_000,

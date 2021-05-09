@@ -117,7 +117,8 @@ def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str
     mark_ids = iter(itertools.count(start=1))
     expire_ids = iter(itertools.count(start=1))
     dt_mark = datetime.datetime.now().replace(microsecond=0)
-    dt_today = dt_mark.date()
+    # Allow for some margin in receiving the expiration message.
+    dt_today = dt_mark.date() - datetime.timedelta(days=2)
     for key, (quantity, basis, match_id) in invs.items():
         if quantity == ZERO:
             continue

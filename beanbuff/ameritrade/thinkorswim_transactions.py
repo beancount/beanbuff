@@ -887,6 +887,10 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
             .addfield('cost', Cost)
             )
 
+    # Convert the order ids to match those from the API.
+    txns = (txns
+            .convert('order_id', 'T{}'.format))
+
     # Make the final ordering correct and finalize the columns.
     txns = (txns
             .cut('account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
