@@ -5,7 +5,7 @@ from typing import List, NamedTuple
 from beancount.core import data
 from beancount.core.account import Account
 
-from beanbuff.data.etl import Record
+from johnny.base.etl import Record
 
 
 class Config(NamedTuple):

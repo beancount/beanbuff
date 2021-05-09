@@ -30,7 +30,7 @@ from dateutil import parser
 import ameritrade
 from ameritrade import utils
 
-from beanbuff.data.etl import petl, Table, Record
+from johnny.base.etl import petl, Table, Record
 
 # from beancount.core import flags
 # from beancount.core import getters

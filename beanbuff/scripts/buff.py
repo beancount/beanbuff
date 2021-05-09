@@ -22,7 +22,7 @@ import click
 import flask
 
 from beanbuff.data import consolidated
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from johnny.base.etl import petl, Table, Record, WrapRecords
 
 
 ZERO = Decimal(0)

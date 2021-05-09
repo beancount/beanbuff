@@ -16,7 +16,7 @@ import click
 from dateutil import parser
 
 from johnny.base.numbers import ToDecimal
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.tastyworks import tastysyms
 

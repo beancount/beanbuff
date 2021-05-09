@@ -54,7 +54,7 @@ from beangulp.importers.mixins import identifier
 from beanbuff.data import beantxns
 from johnny.base import futures
 from beanbuff.data import beansym
-from beanbuff.data.etl import petl, Table, Record
+from johnny.base.etl import petl, Table, Record
 
 
 

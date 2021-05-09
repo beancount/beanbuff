@@ -17,7 +17,7 @@ import hashlib
 from decimal import Decimal
 from typing import Any, Dict, Tuple, Mapping, NamedTuple, Optional
 
-from beanbuff.data.etl import petl, Table, Record
+from johnny.base.etl import petl, Table, Record
 
 
 ZERO = Decimal(0)

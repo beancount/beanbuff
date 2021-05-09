@@ -49,7 +49,7 @@ from dateutil import parser
 import networkx as nx
 
 from matplotlib import pyplot
-from beanbuff.data.etl import petl, Table, Record, PrintGroups
+from johnny.base.etl import petl, Table, Record, PrintGroups
 
 import ameritrade as td
 from ameritrade import options

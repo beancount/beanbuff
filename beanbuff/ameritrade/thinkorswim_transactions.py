@@ -54,7 +54,7 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
 from beanbuff.ameritrade import thinkorswim_utils as utils
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.data import beantxns
 from johnny.base import futures

@@ -25,7 +25,7 @@ from dateutil import parser
 from beancount import loader
 from beancount.core import data
 
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import transactions as transactions_mod
 from beanbuff.data import positions as positions_mod
 from beanbuff.data import beansym

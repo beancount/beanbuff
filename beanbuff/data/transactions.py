@@ -23,7 +23,7 @@ from more_itertools import first
 from beanbuff.data import chains
 from beanbuff.data import match
 from beanbuff.data import discovery
-from beanbuff.data.etl import petl, Table, Record, WrapRecords
+from johnny.base.etl import petl, Table, Record, WrapRecords
 
 from beanbuff.tastyworks import tastyworks_transactions
 from beanbuff.ameritrade import thinkorswim_transactions
