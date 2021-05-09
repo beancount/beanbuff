@@ -76,8 +76,7 @@ def Group(transactions: Table,
     graph = nx.Graph()
 
     for rec in transactions.records():
-        graph.add_node(rec.transaction_id, type='txn',
-                       datetime=rec.datetime)
+        graph.add_node(rec.transaction_id, type='txn', rec=rec)
 
         # Link together by order id.
         if by_order:
@@ -100,14 +99,15 @@ def Group(transactions: Table,
     # Note: This includes rolls if they were carried one as a single order.
     chain_map = {}
     for cc in nx.connected_components(graph):
-        nodes = [(transaction_id, graph.nodes[transaction_id]['datetime'])
-                 for transaction_id in cc
-                 if graph.nodes[transaction_id]['type'] == 'txn']
-        nodes.sort()
-        chain_id = _CreateChainId(*nodes[0])
+        chain_txns = []
+        for transaction_id in cc:
+            node = graph.nodes[transaction_id]
+            if node['type'] == 'txn':
+                chain_txns.append(node['rec'])
 
-        for transaction_id, _ in nodes:
-            chain_map[transaction_id] = chain_id
+        chain_id = ChainName(chain_txns)
+        for rec in chain_txns:
+            chain_map[rec.transaction_id] = chain_id
 
     return (transactions
             .addfield('chain_id', lambda r: chain_map[r.transaction_id]))
@@ -157,42 +157,14 @@ def _CreateChainId(transaction_id: str, _: datetime.datetime) -> str:
     return "{}".format(md5.hexdigest())
 
 
-def RenderChain(transactions: Table, chain_id: str):
-    """Render a chain in a nice readable way."""
+def ChainName(txns: List[Record]) -> str:
+    """Generate a unique chain name. This assumes 'account', 'mindate' and
+    'underlying' columns."""
 
-
-
-# def RenderTradeTable(trade: List[Txn], file=None):
-#     """Render a trade table to the givne file object."""
-#
-#     pr = print
-#     if file:
-#         pr = functools.partial(print, file=file)
-#
-#     trade = list(trade)
-#     trade.insert(0, Txn._fields)
-#     table = (petl.wrap(trade)
-#              .cutout('extra')
-#              .addfield('credits', Credits)
-#              .convert('credits', float))
-#
-#     tclosed = table.select(lambda v: not v.isOpen)
-#     credits_closed = sum(tclosed.values('credits'))
-#
-#     tactive = table.select(lambda v: v.isOpen)
-#     credits_active = sum(tactive.values('credits'))
-#
-#     pos_mtm = sum(tactive
-#                   .select(lambda r: r.txnType == 'MARK')
-#                   .values('credits'))
-#
-#     under, _ = options.GetUnderlying(trade[1].symbol)
-#     pr(tclosed.lookallstr())
-#     pr(credits_closed)
-#     pr()
-#     pr(tactive.lookallstr())
-#     pr(credits_active)
-#     pr()
-#     pr("Position MTM: {}".format(pos_mtm))
-#     pr("Chain Value: {}".format(credits_closed + credits_active))
-#     pr()
+    # Note: We don't know the max date, so we stick with the front date only in
+    # the readable chain name.
+    mindate = min(rec.datetime for rec in txns)
+    any_txn = txns[0]
+    return ".".join([any_txn.account,
+                     "{:%y%m%d_%H%M%S}".format(mindate),
+                     any_txn.underlying.lstrip('/')])

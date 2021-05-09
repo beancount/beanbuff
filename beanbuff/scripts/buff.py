@@ -112,6 +112,7 @@ def RatioDistribution(num, denom, threshold=1000):
     return num/denom * 100
 
 
+# TODO(blais): Convert to Plotly.
 def RenderHistogram(data: np.array, title: str) -> bytes:
     fig, ax = pyplot.subplots()
     ax.set_title(title)
@@ -234,28 +235,32 @@ def risk():
         **GetNavigation())
 
 
+# TODO(blais): P/L attribution tab.
+
+
 @app.route('/stats/')
 def stats():
     # Compute stats on winners and losers.
     chains = FilterChains(STATE.chains)
     win, los = chains.biselect(lambda r: r.chain_pnl > 0)
+    pnl = np.array(chains.values('chain_pnl'))
     pnl_win = np.array(win.values('chain_pnl'))
     pnl_los = np.array(los.values('chain_pnl'))
 
     def Quantize(value):
-        return Decimal(value).quantize(Q)
+        return Decimal(value).quantize(Decimal('0'))
     rows = [
-        ['Description', 'Wins', 'Losses'],
-        ['Number', len(pnl_win), len(pnl_los)],
-        ['Average$', Quantize(np.mean(pnl_win)), -Quantize(np.mean(pnl_los))],
-        ['Total$', Quantize(np.sum(pnl_win)), -Quantize(np.sum(pnl_los))],
+        ['Portfolio', 'Stat'],
+        ['P/L', '${}'.format(Quantize(np.sum(pnl)))],
+        ['# of wins', "{}/{}".format(len(pnl_win), len(pnl))],
+        ['% of wins', "{:.1%}".format(len(pnl_win)/len(pnl))],
+        ['Avg P/L per trade', '${}'.format(Quantize(np.mean(pnl)))],
+        ['Avg P/L win', '${}'.format(Quantize(np.mean(pnl_win)))],
+        ['Avg P/L loss', '${}'.format(Quantize(np.mean(pnl_los)))],
+        ['Max drawdown', '${}'.format(Quantize(np.min(pnl_los)))],
     ]
-    Qratio = Decimal('0.1')
-    print(petl.wrap(rows).lookallstr())
-
     stats_table = (
-        petl.wrap(rows)
-        .addfield('Ratio', lambda r: Decimal(r.Wins/r.Losses).quantize(Qratio)))
+        petl.wrap(rows))
 
     chain_ids = flask.request.args.get('chain_ids')
     return flask.render_template(
@@ -293,8 +298,8 @@ def monitor():
         **GetNavigation())
 
 
-@app.route('/summarize')
-def summarize():
+@app.route('/share')
+def share():
     # Filter down the list of chains.
     chains = (FilterChains(STATE.chains)
               .cut('underlying', 'mindate', 'days', 'init', 'chain_pnl'))

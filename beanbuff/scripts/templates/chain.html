@@ -24,12 +24,11 @@
 {% include 'navigation.html' %}
 <h1>Chain Detail: {{ chain_id }}</h1>
 
+{{ table|safe }}
+
 <div id="chain_history">
 {{ history|safe }}
 </div>
 
-
-{{ table|safe }}
 <body>
-
 </html>

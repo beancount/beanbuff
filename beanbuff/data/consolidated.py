@@ -45,16 +45,6 @@ WIN_FRAC = Decimal('0.50')
 P50 = Decimal('0.80')
 
 
-def ChainName(rec: Record) -> str:
-    """Generate a unique chain name."""
-    # Note: We don't know the max date, so we stick with the front date only in
-    # the readable chain name.
-    return ".".join([
-        rec.account,
-        "{:%y%m%d_%H%M%S}".format(rec.mindate),
-        rec.underlying])
-
-
 def InitialCredits(pairs: Iterator[Tuple[str, Decimal]]) -> Decimal:
     """Compute the initial credits from a group of chain rows."""
     first_order_id = None
@@ -103,8 +93,13 @@ def TransactionsToChains(transactions: Table) -> Table:
         .sort('underlying'))
 
     # Split historical and active chains aggregate and join them to each other.
+    #
+    # Note that we run a left join here because live positions that are filtered
+    # out of the historical transactions (because they're already accounted for
+    # in a ledger as part of another set of unrelated investments) should be
+    # excluded. Marks are created from those positions.
     mark, histo = typed_chains.biselect(lambda r: r.ismark)
-    chains = petl.outerjoin(
+    chains = petl.leftjoin(
         (histo
          .cutout('ismark', 'net_liq', 'pnl_day')
          .rename('cost', 'accr')),
@@ -116,10 +111,9 @@ def TransactionsToChains(transactions: Table) -> Table:
     chains = (
         chains
         .replace('cost', None, ZERO)
-        .convert('cost', lambda v: -v)
+        .convert('cost', lambda v: (-v).quantize(Q))
         .replace('status', None, 'DONE')
         .addfield('days', lambda r: (r.maxdate - r.mindate).days)
-        .addfield('chain_name', ChainName)
         .convert('mindate', lambda v: v.date())
         .convert('maxdate', lambda v: v.date())
         .sort(['underlying', 'maxdate']))
@@ -133,7 +127,7 @@ def FormatActiveChains(chains: Table) -> Table:
     # Clean up and format the table a bit.
     chains = (
         chains
-        .cut('chain_name', 'chain_id', 'account', 'status',
+        .cut('chain_id', 'account', 'status',
              'underlying', 'mindate', 'maxdate',
              'init', 'accr', 'cost', 'commissions', 'fees',
              'days',
@@ -159,11 +153,12 @@ def FormatActiveChains(chains: Table) -> Table:
     # Add Net Liq columns.
     chains = (
         chains
-        .addfield('nla/win', lambda r: ShortNum(-r.accr + r.accr_tgtwin))
+        #.addfield('nla/win', lambda r: ShortNum(-r.accr + r.accr_tgtwin))
         .addfield('nl/win', lambda r: ShortNum(-r.accr + r.tgtwin))
         .addfield('nl/flat', lambda r: ShortNum(-r.accr))
         .addfield('nl/loss', lambda r: ShortNum(-r.accr + r.tgtloss))
-        .addfield('nla/loss', lambda r: ShortNum(-r.accr + r.accr_tgtloss)))
+        #.addfield('nla/loss', lambda r: ShortNum(-r.accr + r.accr_tgtloss))
+    )
 
     chains = (
         chains
@@ -177,11 +172,17 @@ def FormatActiveChains(chains: Table) -> Table:
 
         .addfield('pnl_day', lambda r: r.pnl_day)
         .cutout('pnl_day')
-        )
+    )
 
-    # Remove accrued targets, it's too much.
-    chains = (chains
-              .cutout('accr_tgtwin', 'accr_tgtloss'))
+    # Final reordering for overview.
+    chains = (
+        chains
+        .cut('chain_id', 'account', 'status', 'underlying',
+             'mindate', 'maxdate', 'days',
+             'init', 'accr', 'cost', 'net_liq', 'chain_pnl',
+             'tgtinit%', 'tgtaccr%', 'tgtwin', 'tgtloss', 'p50',
+             'nl/win', 'nl/flat', 'nl/loss',
+             'commis', 'fees'))
 
     return chains
 
@@ -301,7 +302,7 @@ def GetOrderIdsFromLedger(filename: str) -> Set[str]:
         for link in entry.links:
             match = match_link(link)
             if match:
-                order_ids.add(match.groups(1))
+                order_ids.add(match.group(1))
     return order_ids
 
 
