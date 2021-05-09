@@ -5,7 +5,7 @@ import re
 from typing import Optional
 from decimal import Decimal
 
-from beanbuff.data import futures
+from johnny.base import futures
 from beanbuff.data import beansym
 
 

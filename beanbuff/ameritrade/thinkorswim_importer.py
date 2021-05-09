@@ -52,7 +52,7 @@ from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
 from beanbuff.data import beantxns
-from beanbuff.data import futures
+from johnny.base import futures
 from beanbuff.data import beansym
 from beanbuff.data.etl import petl, Table, Record
 

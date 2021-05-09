@@ -57,7 +57,7 @@ from beanbuff.ameritrade import thinkorswim_utils as utils
 from beanbuff.data.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.data import beantxns
-from beanbuff.data import futures
+from johnny.base import futures
 from beanbuff.data import beansym
 #from beanbuff.ameritrade import tdsyms
 

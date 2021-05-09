@@ -43,7 +43,7 @@ petl.config.look_style = 'minimal'
 
 from johnny.base.numbers import ToDecimal
 from beanbuff.data import beansym
-from beanbuff.data import futures
+from johnny.base import futures
 from beanbuff.ameritrade import thinkorswim_utils as utils
 
 
