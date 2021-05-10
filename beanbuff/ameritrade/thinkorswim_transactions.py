@@ -58,6 +58,7 @@ from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.data import beantxns
 from johnny.base import futures
+from johnny.base import numbers
 from beanbuff.data import beansym
 #from beanbuff.ameritrade import tdsyms
 
@@ -429,7 +430,7 @@ def CashBalance_Prepare(table: Table) -> Table:
         .cutout('date', 'time')
 
         # Convert numbers to Decimal instances.
-        .convert(('commissions_fees', 'amount', 'balance'), ToDecimal)
+        .convert(('commissions_fees', 'amount', 'balance'), numbers.ToDecimal)
 
         # Back out the "Misc Fees" field that is missing using consecutive
         # balances.
@@ -474,17 +475,24 @@ def FuturesStatements_Prepare(table: Table) -> Table:
         .addfield('datetime',
                   partial(ParseDateTimePair, 'exec_date', 'exec_time'), index=1)
         .cutout('exec_date', 'exec_time')
-        .convert('trade_date',
-                 lambda v: datetime.datetime.strptime(v, '%m/%d/%y').date())
+        .convert('trade_date', _ParseFuturesDate)
 
         # Remove dashes from empty fields (making them truly empty).
         .convert(('ref', 'misc_fees', 'commissions_fees', 'amount'), RemoveDashEmpty)
 
         # Convert numbers to Decimal or integer instances.
-        .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), ToDecimal)
+        .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), numbers.ToDecimal)
         .convert('ref', lambda v: int(v) if v else 0)
     )
     return ParseDescription(table)
+
+
+def _ParseFuturesDate(string: str) -> datetime.date:
+    """Parse a date from the futures section."""
+    if string == '*':
+        return datetime.date.today()
+    else:
+        return datetime.datetime.strptime(string, '%m/%d/%y').date()
 
 
 def ForexStatements_Prepare(table: Table) -> Table:
@@ -510,7 +518,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .filldown('spread', 'order_id')
 
         # Convert numbers to Decimal instances.
-        .convert(('qty', 'price', 'strike'), ToDecimal, pass_row=True)
+        .convert(('qty', 'price', 'strike'), numbers.ToDecimal)
 
         # Convert pos effect to single word naming.
         .convert('pos_effect', lambda r: 'OPENING' if r == 'TO OPEN' else 'CLOSING')
@@ -622,27 +630,6 @@ def RemoveDashEmpty(value: str) -> str:
     return value if value != '--' else ''
 
 
-def ToDecimal(value: str, row=None) -> Union[Decimal, str]:
-    # Decimalize bond prices.
-    if re.search(r"'{1,2}", value):
-
-        # TODO(blais): If there's a single ' it's 320ths.
-
-        if row is None:
-            raise ValueError("Contract type is needed to determine fraction.")
-        match = re.match(r"(\d+)'{1,2}(\d+)", value)
-        if not match:
-            raise ValueError("Invalid bond price: {}".format(value))
-        # For Treasuries, options quote in 64th's while outrights in 32nd's.
-        divisor = 32 if row.type == 'FUTURE' else 64
-        dec = Decimal(match.group(1)) + Decimal(match.group(2))/divisor
-        #print("DEC", value, "->", dec, row.type)
-        return dec
-    else:
-        # Regular prices.
-        return Decimal(value.replace(',', '')) if value else ZERO
-
-
 #-------------------------------------------------------------------------------
 # Inference from descriptions
 
@@ -691,9 +678,11 @@ def _ParseTradeDescription(description: str) -> Dict[str, Any]:
     assert match, description
     matches = match.groupdict()
     matches['side'] = 'BUY' if matches['side'] == 'BOT' else 'SELL'
-    matches['quantity'] = abs(ToDecimal(matches['quantity']))
+    matches['quantity'] = abs(numbers.ToDecimal(matches['quantity']))
     quantity = matches['quantity']
-    matches['price'] = ToDecimal(matches['price'].lstrip(" @")) if matches['price'] else ''
+    matches['price'] = (numbers.ToDecimal(matches['price'].lstrip(" @"))
+                        if matches['price']
+                        else '')
     matches['venue'] = matches['venue'].lstrip() if matches['venue'] else ''
     rest = matches.pop('rest')
 

@@ -5,18 +5,19 @@ provide a chain-based view of P/L adjusted to realized histories on the trade
 chains.
 """
 
-import collections
 from decimal import Decimal
 from os import path
 from typing import Any, Callable, List, Optional, Tuple, Iterator, Iterable, Set
-import types
+import collections
 import datetime
 import hashlib
+import io
 import logging
+import os
 import pprint
 import re
-import os
 import sys
+import types
 
 from more_itertools import first
 import click
@@ -43,6 +44,10 @@ WIN_FRAC = Decimal('0.50')
 # Probability of hitting 50%.
 # TODO(blais): We setup a default probability.
 P50 = Decimal('0.80')
+
+
+# The name of the annotations file
+ANNOTATIONS_FILENAME = 'johnny_annotations.csv'
 
 
 def InitialCredits(pairs: Iterator[Tuple[str, Decimal]]) -> Decimal:
@@ -131,7 +136,7 @@ def FormatActiveChains(chains: Table) -> Table:
              'underlying', 'mindate', 'maxdate',
              'init', 'accr', 'cost', 'commissions', 'fees',
              'days',
-             'net_liq', 'pnl_day')
+             'net_liq', 'pnl_day', 'trade_type')
         .rename('commissions', 'commis'))
 
     # Add P50 column.
@@ -182,7 +187,7 @@ def FormatActiveChains(chains: Table) -> Table:
              'init', 'accr', 'cost', 'net_liq', 'chain_pnl',
              'tgtinit%', 'tgtaccr%', 'tgtwin', 'tgtloss', 'p50',
              'nl/win', 'nl/flat', 'nl/loss',
-             'commis', 'fees'))
+             'commis', 'fees', 'trade_type'))
 
     return chains
 
@@ -207,7 +212,7 @@ def PercentTargetAccrued(r: Record) -> Decimal:
 
 def ShortNum(number: Decimal) -> str:
     """Make the target numbers compact, they do have to be precise."""
-    return number.quantize(Q1)
+    return number.quantize(Q)
 
 
 def LoseFrac(p: Decimal) -> Decimal:
@@ -306,6 +311,27 @@ def GetOrderIdsFromLedger(filename: str) -> Set[str]:
     return order_ids
 
 
+def FindNamedFile(fileordirs: str, target: str) -> Optional[str]:
+    """Find a given filename in a list of filenames or dirs."""
+
+    found = []
+    for filename in fileordirs:
+        #filename = path.abspath(filename)
+        if path.isdir(filename):
+            for fn in os.listdir(filename):
+                if fn == target:
+                    found.append(path.join(filename, fn))
+        else:
+            if path.basename(filename) == target:
+                found.append(filename)
+
+    if len(found) > 1:
+        raise ValueError("Multiple named files found for {}: {}".format(
+            found, targets))
+
+    return found[0] if found else None
+
+
 def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
     """Read all the data and join it and consolidate it."""
 
@@ -365,13 +391,56 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
                         .addfield('net_liq', None)
                         .addfield('pnl_day', None))
 
+
+
+    # TODO(blais): Remove - for debugging of chains(!).
+    if 1:
+        mapping = transactions.lookup('chain_id')
+        for key, txnlist in mapping.items():
+            underlyings = set(petl.wrap([transactions.header()] + txnlist)
+                              .values('underlying'))
+            if len(underlyings) > 1:
+                print("MULTIPLE UNDERLYINGS:", key, underlyings)
+
+
+
     # Convert to chains.
     chains = TransactionsToChains(transactions)
+
+    # Read the optional annotations file.
+    annotations_filename = FindNamedFile(fileordirs, ANNOTATIONS_FILENAME)
+    if annotations_filename:
+        annotations = petl.fromcsv(CleanCsv(annotations_filename))
+        chains = petl.leftjoin(chains, annotations, key='chain_id')
+    else:
+        chains = (chains
+                  .addfield('trade_type', ''))
 
     # Clean up the chains and add targets.
     chains = FormatActiveChains(chains)
 
+    if 0:
+        print(chains
+              .select(lambda r: r.days < 3)
+              .cut('chain_id', 'mindate', 'maxdate', 'days')
+              .lookallstr())
+
     return transactions, positions, chains
+
+
+def CleanCsv(filename: str) -> str:
+    """Read the contents of a CSV file and clean them up, removing whitespace and embedded
+    comments."""
+    with open(filename) as infile:
+        buf = io.StringIO()
+        for line in infile:
+            line = line.rstrip()
+            if not line:
+                continue
+            if re.match(r'[ \t]*#.*', line):
+                continue
+            print(line, file=buf)
+    return petl.MemorySource(buf.getvalue().encode('utf8'))
 
 
 @click.command()
@@ -389,10 +458,21 @@ def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: 
     # Read in and consolidate all the data.
     _, __, chains = ConsolidateChains(fileordirs, ledger)
 
-    # Remove inactive chains if requested.
+    # Optinally include inactive chains.
     if not inactive:
         chains = (chains
                   .selecteq('status', 'ACTIVE'))
+
+    # Render various subsets of chains for placing in annotations.
+    if 1:
+        chains = (chains
+                  .select(lambda r: r.trade_type is None)
+                  )
+        # chains = (chains
+        #           .select(lambda r: r.status == 'DONE')
+        #           .select(lambda r: r.trade_type is None)
+        #           .select(lambda r: r.days < 3)
+        #           )
 
     # Output the table.
     print(chains.lookallstr())

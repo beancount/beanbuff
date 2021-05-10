@@ -67,7 +67,7 @@ def ToHtmlString(table: Table, cls: str, ids: List[str] = None) -> bytes:
     sink = petl.MemorySource()
     table.tohtml(sink)
     html = sink.getvalue().decode('utf8')
-    html = re.sub("class='petl'", f"class='display compact cell-border' id='{cls}'", html)
+    html = re.sub("class='petl'", f"class='display compact nowrap cell-border' id='{cls}'", html)
     if ids:
         iter_ids = itertools.chain([''], iter(ids))
         html = re.sub('<tr>', lambda _: '<tr id="{}">'.format(next(iter_ids)), html)
