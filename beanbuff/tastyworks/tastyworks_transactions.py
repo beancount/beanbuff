@@ -25,6 +25,7 @@ from johnny.base.numbers import ToDecimal
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.tastyworks import tastysyms
+from beanbuff.data import transactions as txnlib
 
 
 ZERO = Decimal(0)
@@ -267,7 +268,7 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     if not match:
         return None
     account, date1, date2 = match.groups()
-    return account, date2, GetTransactions
+    return account, date2, txnlib.MakeParser(GetTransactions)
 
 
 @click.command()

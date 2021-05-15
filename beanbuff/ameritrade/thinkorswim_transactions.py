@@ -57,6 +57,7 @@ from beanbuff.ameritrade import thinkorswim_utils as utils
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import match
 from beanbuff.data import beantxns
+from beanbuff.data import transactions as txnlib
 from johnny.base import futures
 from johnny.base import numbers
 from beanbuff.data import beansym
@@ -950,7 +951,7 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     if not match:
         return None
     date = match.group(1)
-    return 'thinkorswim', date, GetTransactions
+    return 'thinkorswim', date, txnlib.MakeParser(GetTransactions)
 
 
 @click.command()

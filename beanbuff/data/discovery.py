@@ -10,7 +10,7 @@ from os import path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from johnny.base.etl import petl, Table
-t
+
 from beanbuff.ameritrade import thinkorswim_positions
 from beanbuff.ameritrade import thinkorswim_transactions
 from beanbuff.data import chains
@@ -76,16 +76,11 @@ def GetTransactions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
     filenames = []
     tables = []
     for unused_account, (filename, parser) in sorted(matches.items()):
-        transactions, _ = parser(filename)
+        transactions = parser(filename)
         if not transactions:
             continue
-        filenames.append(filename)
-
-        # Note: These need to be processed by file, separately.
-        # TODO(blais): Process 'other' transactions.
-        transactions = match.Match(transactions)
-        transactions = chains.Group(transactions)
         tables.append(transactions)
+        filenames.append(filename)
 
     table = petl.cat(*tables) if tables else petl.empty()
     return table, filenames
