@@ -11,6 +11,7 @@ import logging
 import pprint
 import re
 import os
+import decimal
 
 import click
 from dateutil import parser
@@ -36,12 +37,17 @@ _INSTYPES = {
 
 def ConvertPoP(pop_str: str) -> Decimal:
     """Convert POP to an integer."""
-    if pop_str == '< 1%':
-        return Decimal(1)
-    elif pop_str == '> 99.5%':
-        return Decimal(99.5)
-    else:
-        return Decimal(pop_str.rstrip('%'))
+    try:
+        if pop_str == '< 1%':
+            return Decimal(1)
+        elif pop_str == '> 99.5%':
+            return Decimal(99.5)
+        elif pop_str == '--':
+            return Decimal(0)
+        else:
+            return Decimal(pop_str.rstrip('%'))
+    except Exception as exc:
+        raise ValueError("Decimal error: {} on '{}'".format(exc, pop_str))
 
 
 def GetPositions(filename: str) -> Table:
