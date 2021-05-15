@@ -1,16 +1,26 @@
 // Bind SLASH to focus on the search box of the DataTable instance from
 // anywhere.
-function InstallDataTableFocus() {
+function InstallDataTableFocus(table) {
+
+    // Install a handler for focusing on a key pressa.
     $(document).keypress(function(ev) {
-        var search = $(".dataTables_filter input");
+        var tdiv = table.table().container()
+        var search_input = $(tdiv).find(".dataTables_filter input");
+        // console.log(search_input);
         if (ev.which == 47 && ev.key == '/')  {
-            if (!search.is(":focus")) {
+            if (!search_input.is(":focus")) {
                 event.preventDefault();
-                search.focus();
+                search_input.focus();
             }
         }
     });
 }
+
+    // // Add column name as class to the column
+    // $(table.table().header()).find('th').each(function (_) {
+    //     ////console.log($(this).text(), $(this).index(), $(this));
+    //     $(this).addClass($(this).text());
+    // });
 
 // // Find a column index by header name.
 // function FindColumn(table, name) {

@@ -19,15 +19,11 @@
           }]
       };
       var table = $('#chains').DataTable(config);
+      InstallDataTableFocus(table);
 
-      InstallDataTableFocus();
-
-      $(table.table().header()).find('th').each(function (_) {
-          $(this).addClass($(this).text());
-          console.log(this);
-      });
-
-      // console.log(table.table().header());
+      // Emphasize some columns of the table.
+      $(table.column(':contains(chain_pnl)').nodes()).addClass('emph-column');
+      $(table.column(':contains(tgtinit%)').nodes()).addClass('emph-column');
 
       // TODO(blais): Remove, this was replaced with a link.
       // When the Clear button is pressed, clear the selection.

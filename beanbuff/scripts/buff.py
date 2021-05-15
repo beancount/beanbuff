@@ -13,6 +13,7 @@ import re
 import threading
 
 import numpy as np
+import networkx as nx
 from matplotlib import pyplot
 import matplotlib
 matplotlib.use('Agg')
@@ -22,6 +23,7 @@ import click
 import flask
 
 from beanbuff.data import consolidated
+from beanbuff.data import chains as chainslib
 from johnny.base.etl import petl, Table, Record, WrapRecords
 
 
@@ -77,11 +79,11 @@ def ToHtmlString(table: Table, cls: str, ids: List[str] = None) -> bytes:
 def GetNavigation() -> Dict[str, str]:
     """Get navigation bar."""
     return {
-        'chains': flask.url_for('chains'),
-        'transactions': flask.url_for('transactions'),
-        'positions': flask.url_for('positions'),
-        'risk': flask.url_for('risk'),
-        'stats': flask.url_for('stats'),
+        'page_chains': flask.url_for('chains'),
+        'page_transactions': flask.url_for('transactions'),
+        'page_positions': flask.url_for('positions'),
+        'page_risk': flask.url_for('risk'),
+        'page_stats': flask.url_for('stats'),
     }
 
 
@@ -130,6 +132,11 @@ def home():
     return flask.redirect(flask.url_for('chains'))
 
 
+@app.route('/favicon.ico')
+def favicon():
+    return flask.redirect(flask.url_for('static', filename='favicon.ico'))
+
+
 @app.route('/chains')
 def chains():
     ids = STATE.chains.values('chain_id')
@@ -143,12 +150,20 @@ def chains():
 
 @app.route('/chain/<chain_id>')
 def chain(chain_id: str):
+    # Isolate the chain summary data.
+    chain = (STATE.chains
+            .selecteq('chain_id', chain_id))
+
+    # Isolate the chain transactional data.
     txns = (STATE.transactions
             .selecteq('chain_id', chain_id))
+
+    # TODO(blais): Isolate this to a function.
+
+    # Figure out parameters to scale for rendering.
     clean_txns = (txns
                   .sort(['datetime', 'strike'])
                   .cut('datetime', 'description', 'strike', 'cost'))
-
     strikes = {strike for strike in clean_txns.values('strike') if strike is not None}
     if not strikes:
         return "No transactions."
@@ -203,10 +218,39 @@ def chain(chain_id: str):
 
     return flask.render_template(
         'chain.html',
-        history=svg.getvalue(),
-        table=ToHtmlString(txns, 'chain'),
         chain_id=chain_id,
+        chain=ToHtmlString(chain, 'chain_summary'),
+        transactions=ToHtmlString(txns, 'chain_transactions'),
+        history=svg.getvalue(),
+        graph=flask.url_for('chain_graph', chain_id=chain_id),
         **GetNavigation())
+
+
+import tempfile
+@app.route('/chain/<chain_id>/graph.png')
+def chain_graph(chain_id: str):
+    txns = (STATE.transactions
+            .selecteq('chain_id', chain_id))
+    graph = chainslib.CreateGraph(txns)
+
+    for name in graph.nodes:
+        node = graph.nodes[name]
+        if node['type'] == 'txn':
+            rec = node['rec']
+            node['label'] = "{}\n{}".format(rec.datetime, rec.description)
+        elif node['type'] == 'order':
+            node['label'] = "order\n{}".format(name)
+        elif node['type'] == 'match':
+            node['label'] = "match\n{}".format(name)
+
+    agraph = nx.nx_agraph.to_agraph(graph)
+    agraph.layout('dot')
+    with tempfile.NamedTemporaryFile(suffix=".png", mode='w') as tmp:
+        agraph.draw(tmp.name)
+        tmp.flush()
+        with open(tmp.name, 'rb') as infile:
+            contents = infile.read()
+    return flask.Response(contents, mimetype='image/pn')
 
 
 @app.route('/transactions')
@@ -235,9 +279,6 @@ def risk():
         **GetNavigation())
 
 
-# TODO(blais): P/L attribution tab.
-
-
 @app.route('/stats/')
 def stats():
     # Compute stats on winners and losers.
@@ -246,18 +287,21 @@ def stats():
     pnl = np.array(chains.values('chain_pnl'))
     pnl_win = np.array(win.values('chain_pnl'))
     pnl_los = np.array(los.values('chain_pnl'))
+    init_cr = np.array(chains.values('init'))
+    accr_cr = np.array(chains.values('accr'))
 
     def Quantize(value):
         return Decimal(value).quantize(Decimal('0'))
     rows = [
         ['Portfolio', 'Stat'],
-        ['P/L', '${}'.format(Quantize(np.sum(pnl)))],
+        ['P/L', '${}'.format(Quantize(np.sum(pnl) if pnl.size else ZERO))],
         ['# of wins', "{}/{}".format(len(pnl_win), len(pnl))],
         ['% of wins', "{:.1%}".format(len(pnl_win)/len(pnl))],
-        ['Avg P/L per trade', '${}'.format(Quantize(np.mean(pnl)))],
-        ['Avg P/L win', '${}'.format(Quantize(np.mean(pnl_win)))],
-        ['Avg P/L loss', '${}'.format(Quantize(np.mean(pnl_los)))],
-        ['Max drawdown', '${}'.format(Quantize(np.min(pnl_los)))],
+        ['Avg P/L per trade', '${}'.format(Quantize(np.mean(pnl) if pnl.size else ZERO))],
+        ['Avg P/L win', '${}'.format(Quantize(np.mean(pnl_win) if pnl_win.size else ZERO))],
+        ['Avg P/L loss', '${}'.format(Quantize(np.mean(pnl_los) if pnl_los.size else ZERO))],
+        ['Max loss', '${}'.format(Quantize(np.min(pnl_los) if pnl_los.size else ZERO))],
+        ['Avg init credits', '${}'.format(Quantize(np.mean(init_cr)))],
     ]
     stats_table = (
         petl.wrap(rows))
@@ -268,25 +312,34 @@ def stats():
         stats_table=ToHtmlString(stats_table, 'stats'),
         pnlhist=flask.url_for('stats_pnlhist', chain_ids=chain_ids),
         pnlpctinit=flask.url_for('stats_pnlpctinit', chain_ids=chain_ids),
+        pnlinit=flask.url_for('stats_pnlinit', chain_ids=chain_ids),
         **GetNavigation())
 
 
-@app.route('/stats/pnlhist')
+@app.route('/stats/pnlhist.png')
 def stats_pnlhist():
     chains = FilterChains(STATE.chains)
     pnl = np.array(chains.values('chain_pnl'))
     pnl = [v for v in pnl if -10000 < v < 10000]
-    image = RenderHistogram(pnl, "P/L$")
+    image = RenderHistogram(pnl, "P/L ($)")
     return flask.Response(image, mimetype='image/png')
 
 
-@app.route('/stats/pnlpctinit')
+@app.route('/stats/pnlpctinit.png')
 def stats_pnlpctinit():
     chains = FilterChains(STATE.chains)
     pnl = np.array(chains.values('chain_pnl')).astype(float)
     creds = np.array(chains.values('init')).astype(float)
     data = RatioDistribution(pnl, creds)
-    image = RenderHistogram(data, "P/L% Initial Credits")
+    image = RenderHistogram(data, "P/L (%/Initial Credits)")
+    return flask.Response(image, mimetype='image/png')
+
+@app.route('/stats/pnlinit.png')
+def stats_pnlinit():
+    chains = FilterChains(STATE.chains)
+    pnl = np.array(chains.values('chain_pnl')).astype(float)
+    init = np.array(chains.values('init')).astype(float)
+    image = RenderHistogram(init, "Initial Credits ($)")
     return flask.Response(image, mimetype='image/png')
 
 
