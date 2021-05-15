@@ -104,17 +104,21 @@ def TransactionsToChains(transactions: Table) -> Table:
     # in a ledger as part of another set of unrelated investments) should be
     # excluded. Marks are created from those positions.
     mark, histo = typed_chains.biselect(lambda r: r.ismark)
-    chains = petl.leftjoin(
-        (histo
-         .cutout('ismark', 'net_liq', 'pnl_day')
-         .rename('cost', 'accr')),
-        (mark
-         .cut('chain_id', 'cost', 'net_liq', 'pnl_day')
-         .addfield('status', 'ACTIVE')), key='chain_id')
+    clean_histo = (histo
+                   # Note: net_liq should be zero for all of those.
+                   .cutout('ismark', 'pnl_day', 'net_liq')
+                   .rename('cost', 'accr'))
+    clean_mark = (mark
+                  .cut('chain_id', 'cost', 'net_liq', 'pnl_day')
+                  .addfield('status', 'ACTIVE'))
+    chains = petl.leftjoin(clean_histo, clean_mark, key='chain_id')
 
     # Finalize the table, filling in missing values and adding per-chain fields.
     chains = (
         chains
+        # Fill in missing net liqs.
+        .convert('net_liq', lambda v: ZERO if v is None else v)
+
         .replace('cost', None, ZERO)
         .convert('cost', lambda v: (-v).quantize(Q))
         .replace('status', None, 'DONE')
@@ -167,16 +171,10 @@ def FormatActiveChains(chains: Table) -> Table:
 
     chains = (
         chains
-
-        .addfield('net_liq', lambda r: r.net_liq)
-        .cutout('net_liq')
-
         .addfield('chain_pnl', lambda r: (r.net_liq or ZERO) - r['nl/flat'])
+        .addfield('pnl_open', lambda r: (r.net_liq or ZERO) + r.cost)
         .addfield('tgtinit%', PercentTargetInitial)
         .addfield('tgtaccr%', PercentTargetAccrued)
-
-        .addfield('pnl_day', lambda r: r.pnl_day)
-        .cutout('pnl_day')
     )
 
     # Final reordering for overview.
@@ -184,8 +182,9 @@ def FormatActiveChains(chains: Table) -> Table:
         chains
         .cut('chain_id', 'account', 'status', 'underlying',
              'mindate', 'maxdate', 'days',
-             'init', 'accr', 'cost', 'net_liq', 'chain_pnl',
-             'tgtinit%', 'tgtaccr%', 'tgtwin', 'tgtloss', 'p50',
+             'init', 'accr', 'cost', 'net_liq', 'pnl_open',
+             'chain_pnl', 'tgtinit%', 'tgtaccr%',
+             'tgtwin', 'tgtloss', 'p50',
              'nl/win', 'nl/flat', 'nl/loss',
              'commis', 'fees', 'trade_type'))
 
@@ -311,6 +310,24 @@ def GetOrderIdsFromLedger(filename: str) -> Set[str]:
     return order_ids
 
 
+def RemoveOrderIds(transactions: Table, order_ids: Set[str]) -> Table:
+    """Remove a given set of order ids and all transactions matching against them.
+
+    This is done so that transactions that have been removed not have residual
+    'Expire' messages remaining.
+    """
+
+    # Find the match ids.
+    match_ids = set(transactions
+                    .selectin('order_id', order_ids)
+                    .values('match_id'))
+
+    # Remove both the order ids and matching rows.
+    return (transactions
+            .select(lambda r: not (r.order_id in order_ids or
+                                   r.match_id in match_ids)))
+
+
 def FindNamedFile(fileordirs: str, target: str) -> Optional[str]:
     """Find a given filename in a list of filenames or dirs."""
 
@@ -346,8 +363,7 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
     if ledger:
         # Remove rows with those order ids.
         order_ids = GetOrderIdsFromLedger(ledger)
-        transactions = (transactions
-                        .selectnotin('order_id', order_ids))
+        transactions = RemoveOrderIds(transactions, order_ids)
 
     # Read the positions files.
     positions, filenames = positions_mod.GetPositions(fileordirs)
@@ -362,6 +378,11 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
     transactions = (transactions
                     .addfield('symbol', SynthesizeSymbol))
 
+    # TODO(blais): Fix this to include all the positions in the TOS account.
+    groups = "({})".format(
+        "|".join(['Strategy - Equities',
+                  'Strategy - Agricultural']))
+
     # If we have a valid positions file, we join it in.
     # This script should work or without one.
     if positions.nrows() > 0:
@@ -371,7 +392,7 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
 
                      # Remove particular groups.
                      # TODO(blais): Make this configurable.
-                     .select('group', lambda v: v is None or not re.match(r'Core\b.*', v)))
+                     .select('group', lambda v: v is None or re.match(groups, v)))
 
         # Join positions to transactions.
         transactions = (
@@ -391,18 +412,20 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
                         .addfield('net_liq', None)
                         .addfield('pnl_day', None))
 
-
+    ### TODO(blais): Remove
+    if 0:
+        print(transactions
+              .selecteq('datetime', None)
+              .lookallstr()); raise SystemExit
 
     # TODO(blais): Remove - for debugging of chains(!).
-    if 1:
+    if 0:
         mapping = transactions.lookup('chain_id')
         for key, txnlist in mapping.items():
             underlyings = set(petl.wrap([transactions.header()] + txnlist)
                               .values('underlying'))
             if len(underlyings) > 1:
                 print("MULTIPLE UNDERLYINGS:", key, underlyings)
-
-
 
     # Convert to chains.
     chains = TransactionsToChains(transactions)
@@ -414,7 +437,11 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
         chains = petl.leftjoin(chains, annotations, key='chain_id')
     else:
         chains = (chains
-                  .addfield('trade_type', ''))
+                  .addfield('trade_type', None))
+
+    # Fill in a default value for a trade type not set by default.
+    chains = (chains
+             .replace('trade_type', None, 'Trading'))
 
     # Clean up the chains and add targets.
     chains = FormatActiveChains(chains)
@@ -464,7 +491,7 @@ def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: 
                   .selecteq('status', 'ACTIVE'))
 
     # Render various subsets of chains for placing in annotations.
-    if 1:
+    if 0:
         chains = (chains
                   .select(lambda r: r.trade_type is None)
                   )
@@ -473,6 +500,14 @@ def main(fileordirs: str, ledger: Optional[str], html: Optional[str], inactive: 
         #           .select(lambda r: r.trade_type is None)
         #           .select(lambda r: r.days < 3)
         #           )
+
+    if 0:
+        unders = (chains
+                  .aggregate('chain_id', {'underlyings': ('underlying', set)})
+                  .select(lambda r: len(r.underlyings) > 1)
+                  )
+        print(unders.lookallstr())
+        raise SystemExit
 
     # Output the table.
     print(chains.lookallstr())
