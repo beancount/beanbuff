@@ -28,7 +28,6 @@ from beancount.core import data
 
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import discovery
-from beanbuff.data import positions as positions_mod
 from beanbuff.data import beansym
 
 
@@ -366,7 +365,7 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
         transactions = RemoveOrderIds(transactions, order_ids)
 
     # Read the positions files.
-    positions, filenames = positions_mod.GetPositions(fileordirs)
+    positions, filenames = discovery.GetPositions(fileordirs)
     for fn in filenames:
         logging.info("Read file '%s'", fn)
 

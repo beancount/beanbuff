@@ -10,11 +10,13 @@ from os import path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from johnny.base.etl import petl, Table
-
+t
+from beanbuff.ameritrade import thinkorswim_positions
+from beanbuff.ameritrade import thinkorswim_transactions
 from beanbuff.data import chains
 from beanbuff.data import match
+from beanbuff.tastyworks import tastyworks_positions
 from beanbuff.tastyworks import tastyworks_transactions
-from beanbuff.ameritrade import thinkorswim_transactions
 
 
 # Args:
@@ -63,7 +65,7 @@ def FindFiles(fileordirs: List[str],
 
 
 def GetTransactions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
-    """Find files and parse and concatenate contents."""
+    """Find transactions files and parse and concatenate contents."""
 
     matches = FindFiles(
         fileordirs, [
@@ -84,6 +86,28 @@ def GetTransactions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
         transactions = match.Match(transactions)
         transactions = chains.Group(transactions)
         tables.append(transactions)
+
+    table = petl.cat(*tables) if tables else petl.empty()
+    return table, filenames
+
+
+def GetPositions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
+    """Find positions files and parse and concatenate contents."""
+
+    matches = FindFiles(
+        fileordirs, [
+            tastyworks_positions.MatchFile,
+            thinkorswim_positions.MatchFile
+        ])
+
+    filenames = []
+    tables = []
+    for unused_account, (filename, parser) in sorted(matches.items()):
+        positions = parser(filename)
+        if not positions:
+            continue
+        filenames.append(filename)
+        tables.append(positions)
 
     table = petl.cat(*tables) if tables else petl.empty()
     return table, filenames
