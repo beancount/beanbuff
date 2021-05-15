@@ -9,6 +9,13 @@ import os
 from os import path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from johnny.base.etl import petl, Table
+
+from beanbuff.data import chains
+from beanbuff.data import match
+from beanbuff.tastyworks import tastyworks_transactions
+from beanbuff.ameritrade import thinkorswim_transactions
+
 
 # Args:
 #   filename: str
@@ -53,3 +60,30 @@ def FindFiles(fileordirs: List[str],
         matchdict[account] = (filename, parser)
 
     return matchdict
+
+
+def GetTransactions(fileordirs: List[str]) -> Tuple[Table, List[str]]:
+    """Find files and parse and concatenate contents."""
+
+    matches = FindFiles(
+        fileordirs, [
+            tastyworks_transactions.MatchFile,
+            thinkorswim_transactions.MatchFile
+        ])
+
+    filenames = []
+    tables = []
+    for unused_account, (filename, parser) in sorted(matches.items()):
+        transactions, _ = parser(filename)
+        if not transactions:
+            continue
+        filenames.append(filename)
+
+        # Note: These need to be processed by file, separately.
+        # TODO(blais): Process 'other' transactions.
+        transactions = match.Match(transactions)
+        transactions = chains.Group(transactions)
+        tables.append(transactions)
+
+    table = petl.cat(*tables) if tables else petl.empty()
+    return table, filenames

@@ -130,7 +130,7 @@ def _LinkMatches(transactions: Table) -> List[Tuple[str, str]]:
     spans = []
     def GatherMatchSpans(grouper):
         rows = list(grouper)
-        print(petl.wrap(rows).lookallstr())
+        #print(petl.wrap(rows).lookallstr())
         min_datetime = datetime.datetime(2100, 1, 1)
         max_datetime = datetime.datetime(1970, 1, 1)
         for rec in sorted(rows, key=lambda r: r.datetime):
