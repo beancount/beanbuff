@@ -206,7 +206,9 @@ def ProcessTradeHistory(equities_cash: Table,
             try:
                 trade_rows = trade_hist_map.pop(dtime)
             except KeyError:
-                raise KeyError("Trade history for cash row '{}' not found".format(crow))
+                message = "Trade history for cash rows: '{}' not found".format(cash_rows)
+                logging.error(message)
+                continue
 
             order_groups.append((dtime, cash_rows, trade_rows))
 
@@ -878,13 +880,15 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
 
     # Convert the order ids to match those from the API.
     txns = (txns
-            .convert('order_id', 'T{}'.format))
+            .convert('order_id', lambda oid: 'T{}'.format(oid) if oid else oid))
 
     # Make the final ordering correct and finalize the columns.
     txns = (txns
             .cut('account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
-                 'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
-                 'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees', 'description',
+                 'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike',
+                 'multiplier',
+                 'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees',
+                 'description',
                  ))
 
     cash_accounts = petl.cat(cashbal_entries, futures_entries)
