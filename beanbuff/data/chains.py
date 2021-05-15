@@ -72,9 +72,34 @@ def Group(transactions: Table,
       related transactions, by episode, or chain.
     """
 
-    # Create a graph to link together related transactions.
-    graph = nx.Graph()
+    # Create the graph.
+    graph = CreateGraph(transactions, by_match, by_order, by_time)
 
+    # Process each connected component to an individual trade.
+    # Note: This includes rolls if they were carried one as a single order.
+    chain_map = {}
+    for cc in nx.connected_components(graph):
+        chain_txns = []
+        for transaction_id in cc:
+            node = graph.nodes[transaction_id]
+            if node['type'] == 'txn':
+                chain_txns.append(node['rec'])
+
+        chain_id = ChainName(chain_txns)
+        for rec in chain_txns:
+            chain_map[rec.transaction_id] = chain_id
+
+    return (transactions
+            .addfield('chain_id', lambda r: chain_map[r.transaction_id]))
+
+
+def CreateGraph(transactions: Table,
+                by_match=True,
+                by_order=True,
+                by_time=True) -> nx.Graph:
+    """Create a graph to link together related transactions."""
+
+    graph = nx.Graph()
     for rec in transactions.records():
         graph.add_node(rec.transaction_id, type='txn', rec=rec)
 
@@ -95,22 +120,7 @@ def Group(transactions: Table,
     for match_id1, match_id2 in linked_matches:
         graph.add_edge(match_id1, match_id2)
 
-    # Process each connected component to an individual trade.
-    # Note: This includes rolls if they were carried one as a single order.
-    chain_map = {}
-    for cc in nx.connected_components(graph):
-        chain_txns = []
-        for transaction_id in cc:
-            node = graph.nodes[transaction_id]
-            if node['type'] == 'txn':
-                chain_txns.append(node['rec'])
-
-        chain_id = ChainName(chain_txns)
-        for rec in chain_txns:
-            chain_map[rec.transaction_id] = chain_id
-
-    return (transactions
-            .addfield('chain_id', lambda r: chain_map[r.transaction_id]))
+    return graph
 
 
 def _LinkMatches(transactions: Table) -> List[Tuple[str, str]]:
@@ -119,24 +129,30 @@ def _LinkMatches(transactions: Table) -> List[Tuple[str, str]]:
     # Gather min and max time for each trade match into a changelist.
     spans = []
     def GatherMatchSpans(grouper):
+        rows = list(grouper)
+        print(petl.wrap(rows).lookallstr())
         min_datetime = datetime.datetime(2100, 1, 1)
         max_datetime = datetime.datetime(1970, 1, 1)
-        for rec in sorted(list(grouper), key=lambda r: r.datetime):
+        for rec in sorted(rows, key=lambda r: r.datetime):
             min_datetime = min(min_datetime, rec.datetime)
             max_datetime = max(max_datetime, rec.datetime)
-        spans.append((min_datetime, rec.underlying, rec.match_id))
-        spans.append((max_datetime, rec.underlying, rec.match_id))
+        expiration = rec.expiration if rec.expiration else datetime.date(1970, 1, 1)
+        spans.append((min_datetime, rec.underlying, expiration, rec.match_id))
+        spans.append((max_datetime, rec.underlying, expiration, rec.match_id))
         return 0
-    list(transactions.aggregate(('underlying', 'match_id'), GatherMatchSpans)
+    # Note: we do not match if the expiration is different; if there is an order
+    # id rolling the position to the next month (from the previous function),
+    # this is sufficient to connect them.
+    list(transactions.aggregate(('underlying', 'expiration', 'match_id'), GatherMatchSpans)
          .records())
 
     # Process the spans in the order of time and allocate a new span id whenever
     # there's a gap without a position/match within one underlying.
-    under_map = {underlying: set() for _, underlying, __ in spans}
+    under_map = {(underlying, expiration): set() for _, underlying, expiration, __ in spans}
     linked_matches = []
-    for dt, underlying, match_id in sorted(spans):
+    for dt, underlying, expiration, match_id in sorted(spans):
         # Update the set of active matches, removing or adding.
-        active_set = under_map[underlying]
+        active_set = under_map[(underlying, expiration)]
         if match_id in active_set:
             active_set.remove(match_id)
         else:
@@ -163,8 +179,7 @@ def ChainName(txns: List[Record]) -> str:
 
     # Note: We don't know the max date, so we stick with the front date only in
     # the readable chain name.
-    mindate = min(rec.datetime for rec in txns)
-    any_txn = txns[0]
-    return ".".join([any_txn.account,
-                     "{:%y%m%d_%H%M%S}".format(mindate),
-                     any_txn.underlying.lstrip('/')])
+    first_txn = next(iter(sorted(txns, key=lambda r: r.datetime)))
+    return ".".join([first_txn.account,
+                     "{:%y%m%d_%H%M%S}".format(first_txn.datetime),
+                     first_txn.underlying.lstrip('/')])
