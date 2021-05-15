@@ -28,6 +28,7 @@ from beanbuff.tastyworks import tastysyms
 
 
 ZERO = Decimal(0)
+ONE = Decimal(1)
 
 
 def GetTransactionId(rec: Record) -> str:
@@ -63,15 +64,22 @@ def GetPrice(rec: Record) -> Decimal:
 
 def GetMultiplier(rec: Record) -> Decimal:
     """Get the underlying contract multiplier."""
+
+    # Use the multiplier from the instrument.
     multiplier = rec.instrument.multiplier
+
+    # Check the multiplier for stocks (which is normally unset).
+    if rec['Instrument Type'] == 'Equity':
+        assert multiplier == 1
+
+    # Sanity check: Verify that the approximate multiplier you can compute using
+    # the (rounded) average price is close to the one we infer from our futures
+    # library. This is a cross-check for the futures library code.
     if rec['Instrument Type'] != 'Future' and rec['Average Price'] != ZERO:
-        # Sanity check: Verify that the approximate multiplier you can compute
-        # using the (rounded) average price is close to the one we infer from
-        # our futures library. This is a cross-check for the futures library
-        # code.
         approx_multiplier = abs(rec['Average Price']) / rec.price
         assert 0.9995 < (multiplier / approx_multiplier) < 1.0005, (
             multiplier, rec['Average Price'], rec.price)
+    assert isinstance(multiplier, int)
     return multiplier
 
 
@@ -175,7 +183,8 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              .addfield('multiplier', GetMultiplier)
 
              # We remove the original multiplier column because it only
-             # represents the multiplier of the
+             # represents the multiplier of the average price and is innacurate.
+             # We want the multiplier of the quantity.
              .cutout('Multiplier')
 
              # Process, clean up and validate the strike price.

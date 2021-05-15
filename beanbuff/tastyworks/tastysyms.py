@@ -25,7 +25,7 @@ def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
         inst = _ParseEquityOptionSymbol(symbol)
     # And finally, just equities.
     elif itype == 'Equity' or itype is not None:
-        inst = beansym.Instrument(underlying=symbol)
+        inst = _ParseEquitySymbol(symbol)
     else:
         raise ValueError(f"Unknown instrument type: {itype}")
     return inst
@@ -33,6 +33,11 @@ def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
 
 # Divisor for TW strike prices.
 _STRIKE_PRICE_DIVISOR = Decimal('1000')
+
+
+def _ParseEquitySymbol(symbol: str) -> beansym.Instrument:
+    return beansym.Instrument(underlying=symbol,
+                              multiplier=1)
 
 
 def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
