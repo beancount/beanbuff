@@ -33,14 +33,18 @@ from johnny.base.etl import Table
 
 # A representation of an option.
 class Instrument(NamedTuple):
+    """An instrument broken down by its component fields.
+    See instrument.md for details.
+    """
+
     # The name of the underlying instrument, stock or futures. For futures, this
-    # includes the leading slash and does not include the expiration month code
-    # (e.g., 'Z1'). Example '/CL'.
+    # includes the leading slash and the expiration month code (e.g., 'Z21').
+    # Example '/CLZ21'. Note that the decade is included as well.
     underlying: str
 
-    # For futures, the contract expiration month code, including the decade,
-    # e.g., 'Z21'. This can be converted to a date for the expiration.
-    calendar: Optional[str] = None
+
+
+
 
     # For options on futures, the particular options contract code, e.g. on /CL,
     # this could be 'LOM'.
@@ -71,6 +75,17 @@ class Instrument(NamedTuple):
         return ToString(self)
 
     @property
+    def instype(self) -> str:
+        """Return the instrument type."""
+        if self.underlying.startswith('/'):
+            return 'FutureOption' if self.expiration is not None else 'Future'
+        else:
+            return 'EquityOption' if self.expiration is not None else 'Equity'
+
+    def is_future(self) -> bool:
+        return self.underlying.startswith('/')
+
+    @property
     def dated_underlying(self) -> str:
         """Return the expiration code."""
         return GetDatedUnderlying(self)
@@ -91,7 +106,7 @@ def FromColumns(
     """Build an Instrument from column values."""
     match = re.match('(/.*)([FGHJKMNQUVXZ]2\d)', underlying)
     if match:
-        underlying, calendar = match.groups()
+        _, calendar = match.groups()
     else:
         calendar = None
 
@@ -106,16 +121,15 @@ def FromColumns(
 
     # Infer the multiplier if it is not provided.
     if multiplier is None:
-
         if calendar is None:
             if expiration is not None:
                 multiplier = futures.OPTION_CONTRACT_SIZE
             else:
                 multiplier = 1
         else:
-            multiplier = futures.MULTIPLIERS[underlying]
+            multiplier = futures.MULTIPLIERS[underlying[:-3]]
 
-    return Instrument(underlying, calendar, optcontract, optcalendar,
+    return Instrument(underlying, optcontract, optcalendar,
                       expiration, strike, side, multiplier)
 
 
@@ -155,20 +169,20 @@ def ToString(inst: Instrument) -> str:
         ## inst.expiration is not None:
         if False:
             # With date
-            return "{}{}_{}{}_{:%y%m%d}_{}{}".format(
-                inst.underlying, inst.calendar,
+            return "{}_{}{}_{:%y%m%d}_{}{}".format(
+                inst.underlying,
                 inst.optcontract, inst.optcalendar,
                 inst.expiration, inst.putcall, inst.strike)
         else:
             # Without date
-            return "{}{}_{}{}_{}{}".format(
-                inst.underlying, inst.calendar,
+            return "{}_{}{}_{}{}".format(
+                inst.underlying,
                 inst.optcontract, inst.optcalendar,
                 inst.putcall, inst.strike)
 
-    elif inst.calendar:
+    elif inst.is_future():
         # Future
-        return "{}{}".format(inst.underlying, inst.calendar)
+        return inst.underlying
 
     else:
         # Equity option
@@ -181,8 +195,6 @@ def ToString(inst: Instrument) -> str:
 
 def GetDatedUnderlying(inst: Instrument) -> str:
     """Return the underlying name with the month code, if present."""
-    if inst.calendar:
-        return "{}{}".format(inst.underlying, inst.calendar)
     return inst.underlying
 
 
@@ -195,8 +207,7 @@ def GetExpirationCode(inst: Instrument) -> str:
 
 
 def GetContractName(symbol: str) -> str:
-    """Return the underlying without the futures calendar expiration from a beamnsym,
-    e.g. '/CL'."""
+    """Return the underlying root without the futures calendar expiration, e.g. '/CL'."""
     underlying = symbol.split('_')[0]
     if underlying.startswith('/'):
         match = re.match('(.*)([FGHJKMNQUVXZ]2\d)', underlying)
@@ -210,7 +221,7 @@ def Expand(table: Table, fieldname: str) -> Table:
     """Expand the symbol name into its component fields."""
     return (table
             .addfield('_instrument', lambda r: FromString(getattr(r, fieldname)))
-            .addfield('instype', None)  # TODO(blais): Generate this.
+            .addfield('instype', lambda r: r._instrument.instype)
             .addfield('underlying', lambda r: r._instrument.underlying)
             .addfield('expiration', lambda r: r._instrument.expiration)
             .addfield('expcode', lambda r: r._instrument.expcode)

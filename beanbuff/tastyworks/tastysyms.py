@@ -37,7 +37,7 @@ _STRIKE_PRICE_DIVISOR = Decimal('1000')
 
 def _ParseEquitySymbol(symbol: str) -> instrument.Instrument:
     return instrument.Instrument(underlying=symbol,
-                              multiplier=1)
+                                 multiplier=1)
 
 
 def _ParseEquityOptionSymbol(symbol: str) -> instrument.Instrument:
@@ -61,18 +61,17 @@ def _ParseStrikeAmount(string: str) -> Decimal:
 
 
 _FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
+_DECADE = datetime.date.today().year % 100 // 10
 
 
 def _ParseFuturesSymbol(symbol: str) -> instrument.Instrument:
     match = re.match(f"/{_FUTSYM}", symbol)
     assert match, "Invalid futures options symbol: {}".format(symbol)
-    underlying, fmonth, fyear = match.groups()
-    underlying = f"/{underlying}"
-    decade = datetime.date.today().year % 100 // 10
-    multiplier = futures.MULTIPLIERS.get(underlying, 1)
+    root, fmonth, fyear = match.groups()
+    underlying = f"/{root}{fmonth}{_DECADE}{fyear}"
+    multiplier = futures.MULTIPLIERS[underlying[:-3]]
     return instrument.Instrument(
         underlying=underlying,
-        calendar=f"{fmonth}{decade}{fyear}",
         multiplier=multiplier)
 
 

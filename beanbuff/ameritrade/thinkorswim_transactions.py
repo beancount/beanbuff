@@ -231,11 +231,11 @@ def ProcessTradeHistory(equities_cash: Table,
 def _CreateInstrument(r: Record) -> str:
     """Create an instrument from the expiration data."""
     return instrument.FromColumns(r.underlying,
-                               r.expiration,
-                               r.expcode,
-                               r.putcall,
-                               r.strike,
-                               r.multiplier)
+                                  r.expiration,
+                                  r.expcode,
+                                  r.putcall,
+                                  r.strike,
+                                  r.multiplier)
 
 
 def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
@@ -609,39 +609,36 @@ def ToInstrument(rec: Record) -> str:
 
     if rec.instype == 'Equity':
         return instrument.Instrument(underlying=underlying,
-                                  multiplier=1)
+                                     multiplier=1)
 
     elif rec.instype == 'Future':
         short_under = underlying[:-3]
-        multiplier = futures.MULTIPLIERS.get(short_under, 1)
-        return instrument.Instrument(underlying=short_under,
-                                  calendar=underlying[-3:],
-                                  multiplier=multiplier)
+        multiplier = futures.MULTIPLIERS[short_under]
+        return instrument.Instrument(underlying=underlying,
+                                     multiplier=multiplier)
 
     elif rec.instype == 'Equity Option':
         expiration = datetime.datetime.strptime(rec.exp.upper(), '%d %b %y').date()
         assert rec.type in {'CALL', 'PUT'}
-        return instrument.Instrument(underlying=underlying[:-3],
-                                  calendar=underlying[-3:],
-                                  expiration=expiration,
-                                  strike=Decimal(rec.strike),
-                                  putcall=rec.type[0],
-                                  multiplier=futures.OPTION_CONTRACT_SIZE)
+        return instrument.Instrument(underlying=underlying,
+                                     expiration=expiration,
+                                     strike=Decimal(rec.strike),
+                                     putcall=rec.type[0],
+                                     multiplier=futures.OPTION_CONTRACT_SIZE)
 
     elif rec.instype == 'Future Option':
         assert rec.exp.startswith('/')
         # TODO(blais): Infer the actual expiration date from CME specs. The
         # software does not provide it.
         short_under = underlying[:-3]
-        multiplier = futures.MULTIPLIERS.get(short_under, 1)
-        return instrument.Instrument(underlying=short_under,
-                                  calendar=underlying[-3:],
-                                  optcontract=rec.exp[1:-3],
-                                  optcalendar=rec.exp[-3:],
-                                  expiration=None,
-                                  strike=Decimal(rec.strike),
-                                  putcall=rec.type[0],
-                                  multiplier=multiplier)
+        multiplier = futures.MULTIPLIERS[short_under]
+        return instrument.Instrument(underlying=underlying,
+                                     optcontract=rec.exp[1:-3],
+                                     optcalendar=rec.exp[-3:],
+                                     expiration=None,
+                                     strike=Decimal(rec.strike),
+                                     putcall=rec.type[0],
+                                     multiplier=multiplier)
 
     else:
         raise ValueError("Could not infer Beansym for {}".format(rec))
