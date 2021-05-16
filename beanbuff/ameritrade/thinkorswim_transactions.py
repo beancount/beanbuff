@@ -558,7 +558,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
 
         # Generate Beancount symbol from the row.
         .addfield('_instrument', ToInstrument)
-        .addfield('underlying', lambda r: r._instrument.dated_underlying)
+        .addfield('underlying', lambda r: r._instrument.underlying)
         .addfield('expiration', lambda r: r._instrument.expiration)
         .addfield('expcode', lambda r: r._instrument.expcode)
         .addfield('putcall', lambda r: 'PUT' if r._instrument.putcall == 'P' else 'CALL')
@@ -633,9 +633,8 @@ def ToInstrument(rec: Record) -> str:
         short_under = underlying[:-3]
         multiplier = futures.MULTIPLIERS[short_under]
         return instrument.Instrument(underlying=underlying,
-                                     optcontract=rec.exp[1:-3],
-                                     optcalendar=rec.exp[-3:],
                                      expiration=None,
+                                     expcode=rec.exp,
                                      strike=Decimal(rec.strike),
                                      putcall=rec.type[0],
                                      multiplier=multiplier)

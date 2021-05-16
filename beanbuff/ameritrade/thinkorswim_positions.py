@@ -136,7 +136,7 @@ def SplitGroups(lines: List[str]) -> List[Group]:
     return group_list
 
 
-_FUTSYM = "(/[A-Z0-9]+)([FGHJKMNQUVXZ]2[0-9])"
+_FUTSYM = "/([A-Z0-9]+[FGHJKMNQUVXZ]2[0-9])"
 
 def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrument:
     """Parse an instrument description to a Beansym."""
@@ -147,18 +147,21 @@ def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrume
                      fr"{_FUTSYM} ([0-9.]+) (PUT|CALL)", string)
     if match:
         (multiplier, month, year, subtype,
-         optcontract, optcalendar,
+         expcode,
          strike, putcall) = match.groups()
-        underlying, calendar = futures.GetUnderlyingMonth(optcontract, optcalendar[0])
+        underlying, month = futures.GetUnderlyingMonth(expcode[:-3], expcode[-3])
         assert underlying == symroot
-        calendar += optcalendar[-2:]
+
+        # TODO(blais): If the month is straddling the year, we will have to
+        # advance by one here. Do this later. Write unit test.
+        year = expcode[-2:]
+
+        underlying = "{underlying}{month}".format(underlying, month, year)
         return instrument.Instrument(underlying=underlying,
-                                  calendar=calendar,
-                                  optcontract=optcontract[1:],
-                                  optcalendar=optcalendar,
-                                  strike=Decimal(strike),
-                                  putcall=putcall[0],
-                                  multiplier=int(multiplier))
+                                     expcode=expcode,
+                                     strike=Decimal(strike),
+                                     putcall=putcall[0],
+                                     multiplier=int(multiplier))
 
     # Handle Equity Option, e.g.,
     # 100 (Weeklys) 4 JUN 21 4130 CALL
@@ -168,19 +171,18 @@ def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrume
         subtype, day_month_year, strike, putcall = match.groups()
         expiration = parse(day_month_year).date()
         return instrument.Instrument(underlying=symroot,
-                                  expiration=expiration,
-                                  strike=Decimal(strike),
-                                  putcall=putcall[0],
-                                  multiplier=100)
+                                     expiration=expiration,
+                                     strike=Decimal(strike),
+                                     putcall=putcall[0],
+                                     multiplier=100)
 
     # Handle Future, e.g.,
     # 2-Year U.S. Treasury Note Futures,Jun-2021,ETH (prev. /ZTM1)
     match = re.fullmatch(r"(.*) \(prev. (/.*)\)", string)
     if match:
         symbol = match.group(2)
-        calendar = symbol[-2:-1] + '2' + symbol[-1:]
-        return instrument.Instrument(underlying=symbol[:-2],
-                                  calendar=calendar)
+        underlying = symbol[:-1] + '2' + symbol[-1:]
+        return instrument.Instrument(underlying=underlying)
 
     # Handle Equity, e.g.,
     # ISHARES TRUST CORE S&P TTL STK ETF

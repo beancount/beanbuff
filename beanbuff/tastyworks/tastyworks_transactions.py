@@ -160,7 +160,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              .addfield('symbol', lambda r: str(r.instrument))
 
              # Add underlying with the normalized futures contract month code.
-             .addfield('underlying', lambda r: r.instrument.dated_underlying)
+             .addfield('underlying', lambda r: r.instrument.underlying)
 
              # Add the account id.
              .addfield('account', account)

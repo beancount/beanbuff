@@ -23,17 +23,17 @@ needed on its own.
   a futures instrument, includes the calendar month (and is normalized to
   include the decade as well).
 
-- `expiration: Optional[datetime.date]`: The expiration date of an option. If
-  this is an option on a future, this may not be present and need be inferred
-  separately (insert it if you have it).
-
 - `expcode: Optional[str]`: The expiration date of an option. If this is an
   option on a future, the corresponding option expiration code, e.g. `LOM21` for
   `/CLM21`.
 
+- `expiration: Optional[datetime.date]`: The expiration date of an option. If
+  this is an option on a future, this may not be present and need be inferred
+  separately (insert it if you have it).
+
 - `putcall: Optional[str]`: If an option, `CALL` or `PUT`
 
-- `strike: Optional[str]`: The strike price of an option (Decimal).
+- `strike: Optional[Decimal]`: The strike price of an option (Decimal).
 
 - `multiplier: int`: A multiplier for the contract, i.e., the contract size.
 

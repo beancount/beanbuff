@@ -88,9 +88,8 @@ def _ParseFuturesOptionSymbol(symbol: str) -> instrument.Instrument:
     # Parse the corresponding options contract.
     match = re.match(f"{_FUTSYM}", contractsym)
     assert match, "Invalid futures options symbol: {}".format(symbol)
-    optcontract, optfmonth, optfyear = match.groups()
-    optdecade = datetime.date.today().year % 100 // 10
-    optcalendar = f"{optfmonth}{optdecade}{optfyear}"
+    root, optfmonth, optfyear = match.groups()
+    expcode = f"{root}{optfmonth}{_DECADE}{optfyear}"
 
     # Parse the option itself.
     match = re.match(r"(\d{6})([CP])([0-9.]+)", symbol[13:])
@@ -102,8 +101,7 @@ def _ParseFuturesOptionSymbol(symbol: str) -> instrument.Instrument:
     putcall = match.group(2)
     strike = Decimal(match.group(3))
 
-    return inst._replace(optcontract=optcontract,
-                         optcalendar=optcalendar,
+    return inst._replace(expcode=expcode,
                          expiration=expiration,
                          putcall=putcall,
                          strike=strike)
