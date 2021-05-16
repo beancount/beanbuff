@@ -53,7 +53,7 @@ from beangulp.importers.mixins import identifier
 
 from beanbuff.data import beantxns
 from johnny.base import futures
-from beanbuff.data import instrument
+from johnny.base import instrument
 from johnny.base.etl import petl, Table, Record
 
 

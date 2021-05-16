@@ -6,7 +6,7 @@ from typing import Optional
 from decimal import Decimal
 
 from johnny.base import futures
-from beanbuff.data import instrument
+from johnny.base import instrument
 
 
 def ParseSymbol(symbol: str, itype: Optional[str]) -> instrument.Instrument:

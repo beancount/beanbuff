@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Dict, Tuple, Mapping, NamedTuple, Optional
 
 from johnny.base.etl import petl, Table, Record
-from beanbuff.data import instrument
+from johnny.base import instrument
 
 
 ZERO = Decimal(0)

@@ -41,8 +41,8 @@ import click
 import petl
 petl.config.look_style = 'minimal'
 
-from johnny.base.numbers import ToDecimal
-from beanbuff.data import instrument
+from johnny.base.number import ToDecimal
+from johnny.base import instrument
 from johnny.base import futures
 from beanbuff.ameritrade import thinkorswim_utils as utils
 

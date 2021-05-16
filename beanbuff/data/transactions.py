@@ -7,7 +7,7 @@ import functools
 
 from beanbuff.data import chains
 from beanbuff.data import match
-from beanbuff.data import instrument
+from johnny.base import instrument
 from johnny.base.etl import Record, Table, petl
 
 

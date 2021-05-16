@@ -28,7 +28,7 @@ from beancount.core import data
 
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import discovery
-from beanbuff.data import instrument
+from johnny.base import instrument
 
 
 # Decimal constants.

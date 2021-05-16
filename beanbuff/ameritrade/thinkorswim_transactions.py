@@ -59,8 +59,8 @@ from beanbuff.data import match
 from beanbuff.data import beantxns
 from beanbuff.data import transactions as txnlib
 from johnny.base import futures
-from johnny.base import numbers
-from beanbuff.data import instrument
+from johnny.base import number
+from johnny.base import instrument
 #from beanbuff.ameritrade import tdsyms
 
 
@@ -458,7 +458,7 @@ def CashBalance_Prepare(table: Table) -> Table:
         .cutout('date', 'time')
 
         # Convert numbers to Decimal instances.
-        .convert(('commissions_fees', 'amount', 'balance'), numbers.ToDecimal)
+        .convert(('commissions_fees', 'amount', 'balance'), number.ToDecimal)
 
         # Back out the "Misc Fees" field that is missing using consecutive
         # balances.
@@ -509,7 +509,7 @@ def FuturesStatements_Prepare(table: Table) -> Table:
         .convert(('ref', 'misc_fees', 'commissions_fees', 'amount'), RemoveDashEmpty)
 
         # Convert numbers to Decimal or integer instances.
-        .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), numbers.ToDecimal)
+        .convert(('misc_fees', 'commissions_fees', 'amount', 'balance'), number.ToDecimal)
         .convert('ref', lambda v: int(v) if v else 0)
     )
     return ParseDescription(table)
@@ -552,7 +552,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .filldown('spread', 'order_id')
 
         # Convert numbers to Decimal instances.
-        .convert(('qty', 'price', 'strike'), numbers.ToDecimal)
+        .convert(('qty', 'price', 'strike'), number.ToDecimal)
 
         # Convert pos effect to single word naming.
         .convert('pos_effect', lambda r: 'OPENING' if r == 'TO OPEN' else 'CLOSING')
@@ -709,9 +709,9 @@ def _ParseTradeDescription(description: str) -> Dict[str, Any]:
     assert match, description
     matches = match.groupdict()
     matches['side'] = 'BUY' if matches['side'] == 'BOT' else 'SELL'
-    matches['quantity'] = abs(numbers.ToDecimal(matches['quantity']))
+    matches['quantity'] = abs(number.ToDecimal(matches['quantity']))
     quantity = matches['quantity']
-    matches['price'] = (numbers.ToDecimal(matches['price'].lstrip(" @"))
+    matches['price'] = (number.ToDecimal(matches['price'].lstrip(" @"))
                         if matches['price']
                         else '')
     matches['venue'] = matches['venue'].lstrip() if matches['venue'] else ''
