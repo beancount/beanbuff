@@ -51,7 +51,6 @@ from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
 
-from beanbuff.data import beantxns
 from johnny.base import futures
 from johnny.base import instrument
 from johnny.base.etl import petl, Table, Record
@@ -102,18 +101,18 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
         ## TODO(blais): Continue here.
         ##thinkorswim_transactions.GetTransactions(file.name)
 
-        bconfig = beantxns.Config(
-            self.config['currency'],
-            self.config['futures_cash'],
-            self.config['futures_contracts'],
-            self.config['futures_options'],
-            self.config['futures_commissions'],
-            self.config['futures_miscfees'],
-            self.config['pnl'],
-            'td-{}',
-            'order-{}')
-        futures_entries = beantxns.CreateTransactions(futures_txns, bconfig)
-        return futures_entries
+        # bconfig = beantxns.Config(
+        #     self.config['currency'],
+        #     self.config['futures_cash'],
+        #     self.config['futures_contracts'],
+        #     self.config['futures_options'],
+        #     self.config['futures_commissions'],
+        #     self.config['futures_miscfees'],
+        #     self.config['pnl'],
+        #     'td-{}',
+        #     'order-{}')
+        # futures_entries = beantxns.CreateTransactions(futures_txns, bconfig)
+        # return futures_entries
 
 
 if __name__ == '__main__':
