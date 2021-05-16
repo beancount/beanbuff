@@ -218,17 +218,6 @@ def LoseFrac(p: Decimal) -> Decimal:
     return -p / (1 - p)
 
 
-# TODO(blais): Move this to a common place.
-def SynthesizeSymbol(r: Record) -> str:
-    """Remove the symbol columns and replace them by a single symbol."""
-    return str(instrument.FromColumns(r.underlying,
-                                      r.expiration,
-                                      r.expcode,
-                                      r.putcall,
-                                      r.strike,
-                                      r.multiplier))
-
-
 def DebugPrint(tabledict):
     for name, table in tabledict.items():
         filename = "/tmp/{}.csv".format(name)
@@ -369,14 +358,6 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
     for fn in filenames:
         logging.info("Read file '%s'", fn)
 
-    # TODO(blais): Do away with this eventually.
-    transactions = (transactions
-                    .select(lambda r: r.instype != 'Equity'))
-
-    # Keep only the open options positions in the transactions log.
-    transactions = (transactions
-                    .addfield('symbol', SynthesizeSymbol))
-
     # TODO(blais): Fix this to include all the positions in the TOS account.
     groups = "({})".format(
         "|".join(['Strategy - Equities',
@@ -410,6 +391,12 @@ def ConsolidateChains(fileordirs: str, ledger: Optional[str]):
         transactions = (transactions
                         .addfield('net_liq', None)
                         .addfield('pnl_day', None))
+
+
+
+
+
+
 
     ### TODO(blais): Remove
     if 0:

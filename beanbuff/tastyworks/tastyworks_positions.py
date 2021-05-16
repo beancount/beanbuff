@@ -16,10 +16,11 @@ import decimal
 import click
 from dateutil import parser
 
-from johnny.base.number import ToDecimal
-from johnny.base.etl import petl, Table, Record, WrapRecords
-from johnny.base import match
+from beanbuff.data import positions as poslib
 from beanbuff.tastyworks import tastysyms
+from johnny.base import match
+from johnny.base.etl import petl, Table, Record, WrapRecords
+from johnny.base.number import ToDecimal
 
 
 def NormalizeAccountName(account: str) -> str:
@@ -91,6 +92,7 @@ def GetPositions(filename: str) -> Table:
 
              # Rename some fields for normalization.
              .rename('Quantity', 'quantity')
+             .convert('quantity', ToDecimal)
              .rename('Trade Price', 'price')
              .rename('Cost', 'cost')
              .rename('Mark', 'mark')
@@ -119,7 +121,7 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     if not match:
         return None
     account, date = match.groups()
-    return account, date, GetPositions
+    return account, date, poslib.MakeParser(GetPositions)
 
 
 @click.command()

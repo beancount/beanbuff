@@ -41,10 +41,11 @@ import click
 import petl
 petl.config.look_style = 'minimal'
 
-from johnny.base.number import ToDecimal
-from johnny.base import instrument
-from johnny.base import futures
 from beanbuff.ameritrade import thinkorswim_utils as utils
+from beanbuff.data import positions as poslib
+from johnny.base import futures
+from johnny.base import instrument
+from johnny.base.number import ToDecimal
 
 
 Table = petl.Table
@@ -149,14 +150,15 @@ def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrume
         (multiplier, month, year, subtype,
          expcode,
          strike, putcall) = match.groups()
-        underlying, month = futures.GetUnderlyingMonth(expcode[:-3], expcode[-3])
+        underlying, month = futures.GetUnderlyingMonth('/{}'.format(expcode[:-3]),
+                                                       expcode[-3])
         assert underlying == symroot
 
         # TODO(blais): If the month is straddling the year, we will have to
         # advance by one here. Do this later. Write unit test.
         year = expcode[-2:]
 
-        underlying = "{underlying}{month}".format(underlying, month, year)
+        underlying = "{}{}{}".format(underlying, month, year)
         return instrument.Instrument(underlying=underlying,
                                      expcode=expcode,
                                      putcall=putcall[0],
@@ -403,7 +405,7 @@ def MatchFile(filename: str) -> Optional[Tuple[str, str, callable]]:
     if not match:
         return None
     date = match.group(1)
-    return 'thinkorswim', date, GetPositions
+    return 'thinkorswim', date, poslib.MakeParser(GetPositions)
 
 
 
