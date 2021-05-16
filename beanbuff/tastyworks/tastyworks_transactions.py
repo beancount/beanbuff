@@ -225,20 +225,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              # .sort('Date')
 
              # See transactions.md.
-             .cut(
-                 # Event info
-                 'account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
-
-                 # Instrument info
-                 'symbol', 'instype', 'underlying', 'expiration', 'expcode',
-                 'putcall', 'strike', 'multiplier',
-
-                 # Balance info
-                 'effect', 'instruction', 'quantity', 'price',
-                 'cost', 'commissions', 'fees',
-
-                 # Descriptive info
-                 'description')
+             .cut(txnlib.FIELDS)
              )
 
     return table.sort('datetime')

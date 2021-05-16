@@ -7,11 +7,28 @@ import functools
 
 from beanbuff.data import chains
 from beanbuff.data import match
+from beanbuff.data import instrument
 from johnny.base.etl import Record, Table, petl
 
 
 GetFn = Callable[[str], Tuple[Table, Table]]
 ParserFn = Callable[[str], Table]
+
+
+# Transaction table field names.
+FIELDS = [
+    # Event info
+    'account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
+
+    # Instrument info
+    'symbol',
+
+    # Balance info
+    'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees',
+
+    # Descriptive info
+    'description',
+]
 
 
 class ValidationError(Exception):
@@ -25,8 +42,14 @@ def MakeParser(parser_fn: GetFn) -> ParserFn:
     def parser(filename: str) -> Table:
         output = parser_fn(filename)
         transactions = output[0]
+
+        # Expand the instrument fields, as they are needed by the match and
+        # chains modules.
+        transactions = instrument.Expand(transactions, 'symbol')
         transactions = match.Match(transactions)
         transactions = chains.Group(transactions)
+        transactions = instrument.Shrink(transactions)
+
         for rec in transactions.records():
             try:
                 ValidateTransactionRecord(rec)
@@ -39,6 +62,7 @@ def MakeParser(parser_fn: GetFn) -> ParserFn:
 
 
 def IsZoneAware(d: datetime.datetime) -> bool:
+    """Return true if the time is timezone aware."""
     return (d.tzinfo is not None and
             d.tzinfo.utcoffset(d) is not None)
 

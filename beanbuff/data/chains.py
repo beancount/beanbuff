@@ -47,8 +47,9 @@ from pprint import pformat
 import numpy
 from dateutil import parser
 import networkx as nx
-
 from matplotlib import pyplot
+
+from beanbuff.data import instrument
 from johnny.base.etl import petl, Table, Record, PrintGroups
 
 import ameritrade as td

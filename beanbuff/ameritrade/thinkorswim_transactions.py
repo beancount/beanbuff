@@ -911,21 +911,7 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
             .convert('order_id', lambda oid: 'T{}'.format(oid) if oid else oid))
 
     # Make the final ordering correct and finalize the columns.
-    txns = (
-        txns.cut(
-            # Event info
-            'account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
-
-            # Instrument info
-            'symbol', 'instype',
-            'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
-
-            # Balance info
-            'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees',
-
-            # Descriptive info
-            'description',
-        ))
+    txns = txns.cut(txnlib.FIELDS)
 
     cash_accounts = petl.cat(cashbal_entries, futures_entries)
 

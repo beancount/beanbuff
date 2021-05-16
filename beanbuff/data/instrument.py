@@ -7,11 +7,16 @@ import re
 from decimal import Decimal
 from typing import List, NamedTuple, Optional
 
+from johnny.base import futures
+from johnny.base.etl import Table
 
 
 # TODO(blais): Normalize all this to include the calendar months in the
 # underlying and match the fields in instrument.md.
 
+# TODO(blais): Set the expiration datetime for Future Option instruments to the
+# end of the corresponding calendar month. It's better than nothing, and you can
+# use it to synthesize expirations where missing.
 
 
 # TODO(blais): Add methods to create each of the subtypes of instruments, with
@@ -82,7 +87,7 @@ def FromColumns(
         expcode: str,
         putcall: str,
         strike: Decimal,
-        multiplier: Decimal) -> Instrument:
+        multiplier: Optional[Decimal]) -> Instrument:
     """Build an Instrument from column values."""
     match = re.match('(/.*)([FGHJKMNQUVXZ]2\d)', underlying)
     if match:
@@ -96,10 +101,45 @@ def FromColumns(
         if match:
             optcontract, optcalendar = match.groups()
 
+    # TODO(blais): Normalize to 'CALL' or 'PUT'
     side = putcall[0] if putcall else None
+
+    # Infer the multiplier if it is not provided.
+    if multiplier is None:
+
+        if calendar is None:
+            if expiration is not None:
+                multiplier = futures.OPTION_CONTRACT_SIZE
+            else:
+                multiplier = 1
+        else:
+            multiplier = futures.MULTIPLIERS[underlying]
 
     return Instrument(underlying, calendar, optcontract, optcalendar,
                       expiration, strike, side, multiplier)
+
+
+def FromString(symbol: str) -> Instrument:
+    """Build an instrument object from the symbol string."""
+
+    # Match options.
+    match = re.match(r'(.*)_(?:(\d{6})|(.*))_([CP])(.*)', symbol)
+    if match:
+        underlying, expi_str, expcode, putcall, strike_str = match.groups()
+        expiration = (datetime.datetime.strptime(expi_str, '%y%m%d').date()
+                      if expi_str
+                      else None)
+        strike = Decimal(strike_str)
+    else:
+        expiration, expcode, putcall, strike = None, None, None, None
+        underlying = symbol
+
+    return FromColumns(underlying,
+                       expiration,
+                       expcode,
+                       putcall,
+                       strike,
+                       None)
 
 
 def ToString(inst: Instrument) -> str:
@@ -164,3 +204,24 @@ def GetContractName(symbol: str) -> str:
         return match.group(1)
     else:
         return underlying
+
+
+def Expand(table: Table, fieldname: str) -> Table:
+    """Expand the symbol name into its component fields."""
+    return (table
+            .addfield('_instrument', lambda r: FromString(getattr(r, fieldname)))
+            .addfield('instype', None)  # TODO(blais): Generate this.
+            .addfield('underlying', lambda r: r._instrument.underlying)
+            .addfield('expiration', lambda r: r._instrument.expiration)
+            .addfield('expcode', lambda r: r._instrument.expcode)
+            .addfield('putcall', lambda r: r._instrument.putcall)
+            .addfield('strike', lambda r: r._instrument.strike)
+            .addfield('multiplier', lambda r: r._instrument.multiplier)
+            .cutout('_instrument'))
+
+
+def Shrink(table: Table) -> Table:
+    """Remove the component fields of the instrument."""
+    return (table
+            .cutout('instype', 'underlying', 'expiration', 'expcode',
+                    'putcall', 'strike', 'multiplier'))

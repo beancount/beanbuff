@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import Any, Dict, Tuple, Mapping, NamedTuple, Optional
 
 from johnny.base.etl import petl, Table, Record
+from beanbuff.data import instrument
 
 
 ZERO = Decimal(0)
@@ -26,14 +27,7 @@ ZERO = Decimal(0)
 class InstKey(NamedTuple):
     account: str
     symbol: str
-    # TODO(blais): Remove all these.
-    instype: str
-    underlying: str
-    expiration: datetime.date
-    expcode: Optional[str]
-    putcall: str
-    strike: Decimal
-    multiplier: Decimal
+    expiration: Optional[datetime.date]
 
 
 def Match(transactions: Table) -> Dict[str, str]:
@@ -44,6 +38,9 @@ def Match(transactions: Table) -> Dict[str, str]:
     a mapping of (transaction-id, match-id). Each `match-id` will be a stable
     unique identifier across runs.
     """
+
+    # TODO(blais): Parse the instrument, add in the multiplier and expiration
+    # for necessary processing here.
 
     # Create a mapping of transaction ids to matches.
     invs, match_map, expire_map = _CreateMatchMappings(transactions)
@@ -87,11 +84,7 @@ def _CreateMatchMappings(transactions: Table):
     match_map = {}
     expire_map = {}
     for rec in transactions.records():
-        instrument_key = InstKey(
-            rec.account,
-            rec.symbol, rec.instype,
-            rec.underlying, rec.expiration, rec.expcode, rec.putcall,
-            rec.strike, rec.multiplier)
+        instrument_key = InstKey(rec.account, rec.symbol, rec.expiration)
         inv = invs[instrument_key]
 
         if rec.rowtype == 'Trade':
@@ -115,8 +108,7 @@ def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str
     """Create synthetic expiration and mark transactions to close matches."""
     closing_transactions = [(
         'account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
-        'symbol', 'instype',
-        'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
+        'symbol',
         'effect', 'instruction', 'quantity', 'price', 'cost', 'description',
         'commissions', 'fees'
     )]
@@ -128,8 +120,7 @@ def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str
     for key, (quantity, basis, match_id) in invs.items():
         if quantity == ZERO:
             continue
-        (account, symbol, instype, underlying, expiration, expcode, putcall,
-         strike, multiplier) = key
+        (account, symbol, expiration) = key
 
         # Check for expired positions.
         if expiration is not None and expiration < dt_today:
@@ -151,8 +142,7 @@ def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str
         sign = -1 if quantity < ZERO else 1
         closing_transactions.append(
             (key.account, transaction_id, rowtype, dt_mark, None,
-             key.symbol, key.instype, key.underlying, key.expiration, key.expcode, key.putcall,
-             key.strike, key.multiplier,
+             key.symbol,
              'CLOSING', instruction, abs(quantity), ZERO, sign * basis, description,
              ZERO, ZERO))
         match_map[transaction_id] = match_id
