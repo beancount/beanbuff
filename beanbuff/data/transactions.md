@@ -1,207 +1,119 @@
 # Transactions Log Table
 
-A *normalized* transactions table contains the following columns and types.
+A normalized transactions table contains the following columns and data types.
 
 
-## Information about the rows
+## Information about the Event
 
-- `account`: A unique identifier for the account number. This implicitly defines
+- `account: str`: A unique identifier for the account number. This implicitly defines
   the brokerage. This can be used if a file contains information about multiple
-  accounts.
+  accounts. The configuration can map this to a public nickname that may or may
+  not reflect the source.
 
-- `transaction_id`: A unique transaction id. This can be given from the system
-  or synthesized from a stable hash from the rows of an input file.
+- `transaction_id: str`: A unique transaction id by which we can identify this
+  transaction. This is essential in order to deduplicate previously imported
+  transactions. This can be given from the system or synthesized from a stable
+  hash from the rows of an input file.
 
-- `datetime`: A `datetime.datetime` instance, converted to local time and naive
-  (no timezone).
+- `datetime: datetime.datetime`: A date/time converted to local time and naive
+  (no timezone, not "timezone aware"). This is the date and time at which the
+  transaction occurred. This is distinct from the settlement date (which is not
+  provided by this data structure).
 
-- `rowtype`: An enum for the row, one of
+- `rowtype: str`: An enum string for the row, whether this is a trade, an
+    expiration, or a mark-to-market synthetic close (used to value currency
+    positions). The value will be one of
 
   * `Trade` (a purchase or sale),
   * `Expire` (an expiration, a receive and deliver type of event),
   * `Mark` (a virtual sale).
 
-  `MARK` is never inserted by the normalization code, that's something that is
+  `Mark` is never inserted by the normalization code, that's something that is
   inserted by further processing code.
 
-- `order_id`: If relevant, a unique id for the number.
+- `order_id: str`: The order id used for the transaction, if there was an order.
+  May include alphabetical characters. This is used to join together multiple
+  transactions that were issued jointly, e.g. a spread, an iron condor, a pairs
+  trade, etc. Note that orders issued as "blast all" will usually have distinct
+  order ids (and our solution typically involves adding another type/id column
+  to join together pairs trades). Expirations don't have orders, so will remain
+  normally unset. This will be set to None if not available.
 
 
-## A description of the instrument itself
+## Information about the Financial Instrument
 
-- `instype`: The instrument type, an enum with possible values:
+- `symbol: str`: The symbol normalized in unambiguous, cross-platform, readable
+  symbology. The symbol for the underlying instrument. This may be an equity,
+  equity option, futures, futures option or spot currency pair.
 
-  * `Equity`
-  * `Equity Option`
-  * `Future`
-  * `Future Option`
+  The individual fields of the instrument's symbol may be expanded into their
+  individual components. See the file "instrument.md" for details.
 
-- `underlying`: The underlying instrument.
 
-- `expiration`: The expiration date of an option. If this is an option on a
-  future, this may not be present and need be inferred separately (insert it if
-  you have it).
+## Information Affecting the Balance
 
-- `expcode`: The expiration date of an option. If this is an option on a
-  future, the corresponding option expiration code, e.g. `LOM21` for `/CLM21`.
+- `effect: str`: The effect on the position, either `OPENING` or `CLOSING`, or
+  `?`. For futures contracts, the value is not usually known, it will be
+  inferred later, from processing the entire file from the initial positions.
 
-- `side`: If an option, `CALL` or `PUT`
+  If it is not known, state-based code providing and updating the state of
+  inventories is required to sort out whether this will cause an increase or
+  decrease of the position automatically. Ideally include the state if you have
+  it available. If not, set the value to `?`.
 
-- `strike`: The strike price of an option (Decimal).
+- `instruction: Optional[str]`: An enum, `BUY`, `SELL`. If this is an
+  expiration, this can be left unset and inferred automatically by the matching
+  code.
 
-- `multiplier`: A multiplier for the contract, i.e., the contract size.
+- `quantity: Decimal`: The quantity bought or sold. This number should always be
+  positive; the 'instruction' field will provide the sign.
 
+- `price: Decimal`: The per-contract price for the instrument. Multiply this by
+  the `quantity` and the `multiplier` to get the `cost`.
 
-## Information affecting the balance
+- `cost: Decimal`: The dollar amount of the position change minus commissions
+  and fees. This is a signed number.
 
-- `effect`: The effect on the position, either `OPENING` or `CLOSING`. For
-  futures contracts, the is not known usually (but can be inferred later, from
-  the initial positions).
+- `commissions: Decimal`: The dollar amount of commissions charged. This is a
+  signed number, usually negative. These are the fees paid to the broker for
+  service.
 
-- `instruction`: An enum, `BUY`, `SELL` or None (for expirations).
+- `fees: Decimal`: The total dollar amount paid for exchange and other
+  regulatory institution fees. This is a signed number, usually negative. Note
+  that this could be broken down into multiple components, but we do not bother
+  with this here, as this is not something we have control over, will not affect
+  our trading, and is often just not available from CSV downloads.
 
-- `quantity`: A positive number for the quantity of items.
 
-- `price`: The per-contract price for the instrument. Multply this by the
-  `quantity` and the `multiplier` to get the `cost`.
+## Descriptive information
 
-- `cost`: The dollar amount of the position change minus commissions and fees.
-  This is a signed number.
+- `description: str`: An optional free-form description string describing the
+  transaction, if one is available. This is used for rendering debugging outputs
+  and for rendering transactions in accounting systems. If not set, leave an
+  empty string (not `None`).
 
-- `commissions`: The dollar amount of commissions charged. This is a signed
-  number, usually negative.
 
-- `fees`: The dollar amount of fees charged. This is a signed number, usually
-  negative.
+## Chaining Information
 
+- `match_id: str`: A unique random id which links together transactions reducing
+  each other. A buy of a particular option, followed by a partial sell, and a
+  final sell, would all share the same match id. This maps closing transactions
+  to their corresponding opening ones.
 
-## Superfluous information
+  This is normally not provided by the importers, and is filled in later by
+  analysis code. The field is always set, even if there's only an opening
+  transaction.
 
-- `description`: An optional free-form description string describing the
-  transaction. This is used for debugging and for rendering transactions in
-  accounting systems.
+  (Note the inherent conflict in the 1:1 relationship here: a single transaction
+  may close multiple opening ones and vice-versa. In order to make this a 1:1
+  match. In theory we would have to split one or both of the opening/closing
+  sides.)
 
+- `chain_id`: A unique random id which links together transactions grouped
+  together in a sequence of events. A "trade", or "chain" ofrelated transactions
+  over time. For instance, selling a strangle, then closing one side, and
+  rolling the other side, and then closing, could be considered a single chain
+  of events.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## TODO(blais): Remove and replace by simple petl tables as per `transactions.md`.
-
-
-# Appendix
-
-TODO(blais): Merge in some of the descriptionsf from this in eventually.
-
-```
-class Txn(NamedTuple):
-    """A trading transaction object."""
-
-    # The date and time at which the transaction occurred. This is distinct from
-    # the settlement date (which is not provided by this data structure).
-    datetime: datetime.datetime
-
-    # A unique transaction id by which we can identify this transaction. This is
-    # essential in order to deduplicate previously imported transactions and is
-    # usually available.
-    transaction_id: str
-
-    # The order id used for the transaction, if there was an order. This is used
-    # to join together multiple transactions that were issued jointly, e.g. a
-    # spread, an iron condor, a pairs trade, etc. Expirations don't have orders,
-    # so will remain unset normally.
-    order_id: Optional[str]
-
-    # The id linking closing transactions to their corresponding opening ones.
-    # This is normally not provided by the importers, and is filled in later by
-    # analysis code.
-    #
-    # Note the inherent conflict in the 1:1 relationship here: a single
-    # transactions may close multiple opening ones and vice-versa. In order to
-    # make this a 1:1 match, we may have to split one or both of the
-    # opening/closing sides. TODO(blais): Review this.
-    match_id: Optional[str]
-
-    # Trade, chain or strategy id linking together related transactions over
-    # time. For instance, selling a strangle, then closing one side, and rolling
-    # the other side, and then closing, could be considered a single chain of
-    # events. As for the match id, this is normally empty and filled in later on
-    # by analysis code.
-    trade_id: Optional[str]
-
-    # Whether this is a trade, an expiration, or a mark-to-market synthetic
-    # close (used to value currency positions).
-    rowtype: TxnType
-
-    # The type of transaction, buy, sell. If this is an expiration, this can be
-    # left unset.
-    #
-    # Like for the position effect, the value of this field can be inferred for
-    # expirations but the state of the inventories will be required in ordered
-    # to synthesize the right side.
-    instruction: Optional[Instruction]
-
-    # Whether the transaction is opening or closing, if it is known.
-    #
-    # If it is not known, state-based code providing and updating the state of
-    # inventories is required to sort out whether this will cause an increase or
-    # decrease of the position automatically. Ideally, if you have the sign,
-    # include it here.
-    effect: Optional[Effect]
-
-    # The symbol for the underlying instrument. This may be an equity, equity
-    # option, futures, futures option or spot currency pair.
-    #
-    # TODO(blais): Turn this to 'underyling' and add detail columns for options.
-    underlying: str
-
-    # The currency that the instrument is quoted in.
-    currency: str
-
-    # The quantity bought or sold. This number should always be positive. The
-    # 'instruction' field will provide the sign.
-    quantity: Decimal
-
-    # The multiplier from the quantity. This can be left unset for an implicit
-    # value of 1. For equity options, it should be set to 100, and for futures
-    # contracts, set to whatever the multiplier for the contract is. (These
-    # values are static and technically they could be joined dynamically from
-    # another table, but for the purpose of keeping a simple table and ensuring
-    # against historical adjustments in contract multipliers we include it
-    # here.)
-    multiplier: Optional[Decimal]
-
-    # The price, in the quote currency, at which the instrument transacted.
-    price: Decimal
-
-    # The total amount in commissions, which are the fees paid to the broker for
-    # service.
-    commissions: Decimal
-
-    # The total amount paid for exchange and other regulatory institution fees.
-    fees: Decimal
-
-    # A textual description to attach to the transaction, if one is available.
-    # This can be used to convert to Beancount transactions to provide
-    # meaningful narration.
-    description: Optional[str]
-
-    # Instrument type.
-    instype: str
-
-```
+  Similar to the match id, this is left empty by the converters and filled in
+  later on by analysis code.

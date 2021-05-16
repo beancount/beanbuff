@@ -1,3 +1,5 @@
+# Rename this to instrument.py.
+
 """Normalized symbols."""
 
 import datetime

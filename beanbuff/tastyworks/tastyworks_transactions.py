@@ -120,7 +120,7 @@ def GetPosEffect(rec: Record) -> Optional[str]:
     elif rec.rowtype == 'Expire':
         return 'CLOSING'
     else:
-        return ''
+        return '?'
 
 
 def ParseStrikePrice(string: str) -> Decimal:
@@ -157,6 +157,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              # Parse the instrument from the original row.
              .addfield('instrument', lambda r: tastysyms.ParseSymbol(
                  r['Symbol'], r['Instrument Type']))
+             .addfield('symbol', lambda r: str(r.instrument))
 
              # Add underlying with the normalized futures contract month code.
              .addfield('underlying', lambda r: r.instrument.dated_underlying)
@@ -197,6 +198,7 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
 
              # Rename some of the columns to be passed through.
              .rename('Order #', 'order_id')
+             .convert('order_id', lambda v: v or None)
              .rename('Instrument Type', 'instype')
              .rename('Description', 'description')
              .rename('Call or Put', 'putcall')
@@ -223,12 +225,20 @@ def NormalizeTrades(table: petl.Table, account: str) -> petl.Table:
              # .sort('Date')
 
              # See transactions.md.
-             .cut('account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
-                  'instype', 'underlying', 'expiration', 'expcode',
-                  'putcall', 'strike', 'multiplier',
-                  'effect', 'instruction', 'quantity', 'price',
-                  'cost', 'commissions', 'fees',
-                  'description')
+             .cut(
+                 # Event info
+                 'account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
+
+                 # Instrument info
+                 'symbol', 'instype', 'underlying', 'expiration', 'expcode',
+                 'putcall', 'strike', 'multiplier',
+
+                 # Balance info
+                 'effect', 'instruction', 'quantity', 'price',
+                 'cost', 'commissions', 'fees',
+
+                 # Descriptive info
+                 'description')
              )
 
     return table.sort('datetime')
