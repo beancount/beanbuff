@@ -16,7 +16,7 @@ import decimal
 import click
 from dateutil import parser
 
-from beanbuff.data import positions as poslib
+from johnny.base import positions as poslib
 from beanbuff.tastyworks import tastysyms
 from johnny.base import match
 from johnny.base.etl import petl, Table, Record, WrapRecords

@@ -42,7 +42,7 @@ import petl
 petl.config.look_style = 'minimal'
 
 from beanbuff.ameritrade import thinkorswim_utils as utils
-from beanbuff.data import positions as poslib
+from johnny.base import positions as poslib
 from johnny.base import futures
 from johnny.base import instrument
 from johnny.base.number import ToDecimal
