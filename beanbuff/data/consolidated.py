@@ -28,7 +28,7 @@ from beancount.core import data
 
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data import discovery
-from beanbuff.data import beansym
+from beanbuff.data import instrument
 
 
 # Decimal constants.
@@ -221,7 +221,7 @@ def LoseFrac(p: Decimal) -> Decimal:
 # TODO(blais): Move this to a common place.
 def SynthesizeSymbol(r: Record) -> str:
     """Remove the symbol columns and replace them by a single symbol."""
-    return str(beansym.FromColumns(r.underlying,
+    return str(instrument.FromColumns(r.underlying,
                                    r.expiration,
                                    r.expcode,
                                    r.putcall,

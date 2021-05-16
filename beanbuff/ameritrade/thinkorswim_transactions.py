@@ -60,7 +60,7 @@ from beanbuff.data import beantxns
 from beanbuff.data import transactions as txnlib
 from johnny.base import futures
 from johnny.base import numbers
-from beanbuff.data import beansym
+from beanbuff.data import instrument
 #from beanbuff.ameritrade import tdsyms
 
 
@@ -230,7 +230,7 @@ def ProcessTradeHistory(equities_cash: Table,
 
 def _CreateInstrument(r: Record) -> str:
     """Create an instrument from the expiration data."""
-    return beansym.FromColumns(r.underlying,
+    return instrument.FromColumns(r.underlying,
                                r.expiration,
                                r.expcode,
                                r.putcall,
@@ -392,7 +392,7 @@ def SplitGroupsToTransactions(groups: List[Group],
                 row_desc = ("{}  [{}/{}]".format(description, index, len(trade_rows))
                             if len(trade_rows) > 1
                             else description)
-                inst = beansym.FromColumns(
+                inst = instrument.FromColumns(
                     trow.underlying,
                     trow.expiration,
                     trow.expcode,
@@ -608,20 +608,20 @@ def ToInstrument(rec: Record) -> str:
     underlying = SYMBOL_NAME_CHANGES.get(underlying, underlying)
 
     if rec.instype == 'Equity':
-        return beansym.Instrument(underlying=underlying,
+        return instrument.Instrument(underlying=underlying,
                                   multiplier=1)
 
     elif rec.instype == 'Future':
         short_under = underlying[:-3]
         multiplier = futures.MULTIPLIERS.get(short_under, 1)
-        return beansym.Instrument(underlying=short_under,
+        return instrument.Instrument(underlying=short_under,
                                   calendar=underlying[-3:],
                                   multiplier=multiplier)
 
     elif rec.instype == 'Equity Option':
         expiration = datetime.datetime.strptime(rec.exp.upper(), '%d %b %y').date()
         assert rec.type in {'CALL', 'PUT'}
-        return beansym.Instrument(underlying=underlying[:-3],
+        return instrument.Instrument(underlying=underlying[:-3],
                                   calendar=underlying[-3:],
                                   expiration=expiration,
                                   strike=Decimal(rec.strike),
@@ -634,7 +634,7 @@ def ToInstrument(rec: Record) -> str:
         # software does not provide it.
         short_under = underlying[:-3]
         multiplier = futures.MULTIPLIERS.get(short_under, 1)
-        return beansym.Instrument(underlying=short_under,
+        return instrument.Instrument(underlying=short_under,
                                   calendar=underlying[-3:],
                                   optcontract=rec.exp[1:-3],
                                   optcalendar=rec.exp[-3:],

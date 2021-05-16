@@ -42,7 +42,7 @@ import petl
 petl.config.look_style = 'minimal'
 
 from johnny.base.numbers import ToDecimal
-from beanbuff.data import beansym
+from beanbuff.data import instrument
 from johnny.base import futures
 from beanbuff.ameritrade import thinkorswim_utils as utils
 
@@ -138,7 +138,7 @@ def SplitGroups(lines: List[str]) -> List[Group]:
 
 _FUTSYM = "(/[A-Z0-9]+)([FGHJKMNQUVXZ]2[0-9])"
 
-def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
+def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrument:
     """Parse an instrument description to a Beansym."""
 
     # Handle Future Option, e.g.,
@@ -152,7 +152,7 @@ def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
         underlying, calendar = futures.GetUnderlyingMonth(optcontract, optcalendar[0])
         assert underlying == symroot
         calendar += optcalendar[-2:]
-        return beansym.Instrument(underlying=underlying,
+        return instrument.Instrument(underlying=underlying,
                                   calendar=calendar,
                                   optcontract=optcontract[1:],
                                   optcalendar=optcalendar,
@@ -167,7 +167,7 @@ def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
     if match:
         subtype, day_month_year, strike, putcall = match.groups()
         expiration = parse(day_month_year).date()
-        return beansym.Instrument(underlying=symroot,
+        return instrument.Instrument(underlying=symroot,
                                   expiration=expiration,
                                   strike=Decimal(strike),
                                   putcall=putcall[0],
@@ -179,7 +179,7 @@ def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
     if match:
         symbol = match.group(2)
         calendar = symbol[-2:-1] + '2' + symbol[-1:]
-        return beansym.Instrument(underlying=symbol[:-2],
+        return instrument.Instrument(underlying=symbol[:-2],
                                   calendar=calendar)
 
     # Handle Equity, e.g.,
@@ -187,7 +187,7 @@ def ParseInstrumentDescription(string: str, symroot: str) -> beansym.Instrument:
     # ISHARES TRUST RUS 2000 GRW ETF
     match = re.fullmatch(r"(.*) ETF( NEW)?", string)
     if match:
-        return beansym.Instrument(underlying=symroot)
+        return instrument.Instrument(underlying=symroot)
 
     raise ValueError("Could not parse description: '{}'".format(string))
 

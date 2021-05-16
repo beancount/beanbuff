@@ -6,10 +6,10 @@ from typing import Optional
 from decimal import Decimal
 
 from johnny.base import futures
-from beanbuff.data import beansym
+from beanbuff.data import instrument
 
 
-def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
+def ParseSymbol(symbol: str, itype: Optional[str]) -> instrument.Instrument:
     """Parse a symbol from the Tastyworks platforms."""
     if not symbol:
         return None
@@ -35,14 +35,14 @@ def ParseSymbol(symbol: str, itype: Optional[str]) -> beansym.Instrument:
 _STRIKE_PRICE_DIVISOR = Decimal('1000')
 
 
-def _ParseEquitySymbol(symbol: str) -> beansym.Instrument:
-    return beansym.Instrument(underlying=symbol,
+def _ParseEquitySymbol(symbol: str) -> instrument.Instrument:
+    return instrument.Instrument(underlying=symbol,
                               multiplier=1)
 
 
-def _ParseEquityOptionSymbol(symbol: str) -> beansym.Instrument:
+def _ParseEquityOptionSymbol(symbol: str) -> instrument.Instrument:
     # e.g. 'TLRY  210416C00075000' for equity option;
-    return beansym.Instrument(
+    return instrument.Instrument(
         underlying=symbol[0:6].rstrip(),
         expiration=datetime.date(int(symbol[6:8]), int(symbol[8:10]), int(symbol[10:12])),
         putcall=symbol[12],
@@ -63,20 +63,20 @@ def _ParseStrikeAmount(string: str) -> Decimal:
 _FUTSYM = "([A-Z0-9]+)([FGHJKMNQUVXZ])([0-9])"
 
 
-def _ParseFuturesSymbol(symbol: str) -> beansym.Instrument:
+def _ParseFuturesSymbol(symbol: str) -> instrument.Instrument:
     match = re.match(f"/{_FUTSYM}", symbol)
     assert match, "Invalid futures options symbol: {}".format(symbol)
     underlying, fmonth, fyear = match.groups()
     underlying = f"/{underlying}"
     decade = datetime.date.today().year % 100 // 10
     multiplier = futures.MULTIPLIERS.get(underlying, 1)
-    return beansym.Instrument(
+    return instrument.Instrument(
         underlying=underlying,
         calendar=f"{fmonth}{decade}{fyear}",
         multiplier=multiplier)
 
 
-def _ParseFuturesOptionSymbol(symbol: str) -> beansym.Instrument:
+def _ParseFuturesOptionSymbol(symbol: str) -> instrument.Instrument:
     # e.g., "./6JM1 JPUK1 210507P0.009" for futures option.
     assert symbol.startswith(r"./"), "Invalid futures options symbol: {}".format(symbol)
     underlying = symbol[1:7].rstrip()

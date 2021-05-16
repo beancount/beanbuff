@@ -71,7 +71,7 @@ def ValidateTransactionRecord(r: Record):
     # Check the normalized symbol.
     assert r.symbol and isinstance(r.symbol, str)
     # TODO(blais): Parse the symbol to ensure it's right.
-    ## assert beansym.Parse(r.symbol)
+    ## assert instrument.Parse(r.symbol)
 
     # A quantity of 'None' is allowed if the logs don't include the expiration
     # quantity, and is filled in automatically by matching code.
