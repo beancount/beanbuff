@@ -15,15 +15,6 @@ from johnny.base.etl import Table
 # end of the corresponding calendar month. It's better than nothing, and you can
 # use it to synthesize expirations where missing.
 
-
-# TODO(blais): Add methods to create each of the subtypes of instruments, with
-# validation.
-#
-# TODO(blais): Add accessor for instrument type (e.g., "Future Option").
-#
-# TODO(blais): Fold the calendar months into the underlyings and provide methods
-# to extract them instead.
-#
 # TODO(blais): What about the subtype, e.g. (European) (Physical), etc.? That
 # is currently lost.
 
@@ -39,16 +30,18 @@ class Instrument(NamedTuple):
     # Example '/CLZ21'. Note that the decade is included as well.
     underlying: str
 
-    # For options on futures, the expiration code, including its calendar month,
-    # e.g. this could be 'LOM21'. This excludes a leading slash. .
-    expcode: Optional[str] = None
-
     # For options, the expiration date for the options contract. For options on
     # futures, this is the expitation of the option, not of the underlying; this
     # should be compatible with the 'expcode' field.
     expiration: Optional[datetime.date] = None
 
+    # For options on futures, the expiration code, including its calendar month,
+    # e.g. this could be 'LOM21'. This excludes a leading slash. .
+    expcode: Optional[str] = None
+
     # For options, the side is represented by the letter 'C' or 'P'.
+    #
+    # TODO(blais): Normalize to 'CALL' or 'PUT'
     putcall: Optional[str] = None
 
     # For options, the strike price.
@@ -62,12 +55,15 @@ class Instrument(NamedTuple):
     def instype(self) -> str:
         """Return the instrument type."""
         if self.underlying.startswith('/'):
-            return 'Future Option' if self.expiration is not None else 'Future'
+            return 'Future Option' if self.putcall else 'Future'
         else:
-            return 'Equity Option' if self.expiration is not None else 'Equity'
+            return 'Equity Option' if self.putcall else 'Equity'
 
     def is_future(self) -> bool:
         return self.underlying.startswith('/')
+
+    def is_option(self) -> bool:
+        return bool(self.putcall)
 
     def __str__(self):
         """Convert an instrument to a string code."""
@@ -75,20 +71,21 @@ class Instrument(NamedTuple):
 
     @staticmethod
     def from_string(self, string: str) -> 'Instrument':
-        return FromString(strin)
+        return FromString(string)
 
 
-def FromColumns(
-        underlying: str,
-        expiration: datetime.date,
-        expcode: str,
-        putcall: str,
-        strike: Decimal,
-        multiplier: Optional[Decimal]) -> Instrument:
+def FromColumns(underlying: str,
+                expiration: Optional[datetime.date],
+                expcode: Optional[str],
+                putcall: Optional[str],
+                strike: Optional[Decimal],
+                multiplier: int) -> Instrument:
     """Build an Instrument from column values."""
 
+    assert not expcode or not expcode.startswith('/')
+
     # TODO(blais): Normalize to 'CALL' or 'PUT'
-    side = putcall[0] if putcall else None
+    putcall = putcall[0] if putcall else None
 
     # Infer the multiplier if it is not provided.
     if multiplier is None:
@@ -106,14 +103,14 @@ def FromColumns(
         else:
             multiplier = futures.MULTIPLIERS[underlying[:-3]]
 
-    return Instrument(underlying, expcode, expiration, strike, side, multiplier)
+    return Instrument(underlying, expiration, expcode, putcall, strike, multiplier)
 
 
 def FromString(symbol: str) -> Instrument:
     """Build an instrument object from the symbol string."""
 
     # Match options.
-    match = re.match(r'(.*)_(?:(\d{6})|(.*))_([CP])(.*)', symbol)
+    match = re.match(r'(/?[A-Z0-9]+)_(?:(\d{6})|([A-Z0-9]+))_([CP])(.*)', symbol)
     if match:
         underlying, expi_str, expcode, putcall, strike_str = match.groups()
         expiration = (datetime.datetime.strptime(expi_str, '%y%m%d').date()
@@ -121,6 +118,7 @@ def FromString(symbol: str) -> Instrument:
                       else None)
         strike = Decimal(strike_str)
     else:
+        assert '_' not in symbol, symbol
         expiration, expcode, putcall, strike = None, None, None, None
         underlying = symbol
 

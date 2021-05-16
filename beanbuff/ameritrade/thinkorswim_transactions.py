@@ -232,7 +232,7 @@ def _CreateInstrument(r: Record) -> str:
     """Create an instrument from the expiration data."""
     return instrument.FromColumns(r.underlying,
                                   r.expiration,
-                                  r.expcode,
+                                  r.expcode or None,
                                   r.putcall,
                                   r.strike,
                                   r.multiplier)
@@ -392,10 +392,11 @@ def SplitGroupsToTransactions(groups: List[Group],
                 row_desc = ("{}  [{}/{}]".format(description, index, len(trade_rows))
                             if len(trade_rows) > 1
                             else description)
+
                 inst = instrument.FromColumns(
                     trow.underlying,
                     trow.expiration,
-                    trow.expcode,
+                    trow.expcode.lstrip('/') if trow.expcode else None,
                     trow.putcall,
                     trow.strike,
                     trow.multiplier)
@@ -526,6 +527,12 @@ def ForexStatements_Prepare(table: Table) -> Table:
     return []
 
 
+def GetPutCall(rec: Record) -> str:
+    return (('PUT' if rec._instrument.putcall == 'P' else 'CALL')
+            if rec._instrument.strike
+            else None)
+
+
 def AccountTradeHistory_Prepare(table: Table) -> Table:
     """Prepare the account trade history table."""
 
@@ -561,7 +568,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .addfield('underlying', lambda r: r._instrument.underlying)
         .addfield('expiration', lambda r: r._instrument.expiration)
         .addfield('expcode', lambda r: r._instrument.expcode)
-        .addfield('putcall', lambda r: 'PUT' if r._instrument.putcall == 'P' else 'CALL')
+        .addfield('putcall', GetPutCall)
         .addfield('strike', lambda r: r._instrument.strike)
         .addfield('multiplier', lambda r: Decimal(r._instrument.multiplier))
         .cutout('symbol', 'exp', 'strike', 'type')
@@ -848,25 +855,25 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
 
     # Pull out the trading log which contains trade information over all the
     # instrument but not any of the fees.
-    tradehist = (tables['Account Trade History']
-                 # Add an absolute value quantity field.
-                 .addfield('quantity', lambda r: abs(r.qty)))
+    trade_hist = (tables['Account Trade History']
+                  # Add an absolute value quantity field.
+                  .addfield('quantity', lambda r: abs(r.qty)))
 
     # Split up the "Cash Balance" table and process non-trade entries.
     cashbal = tables['Cash Balance']
-    equities_trade, cashbal_nontrade = SplitCashBalance(cashbal, tradehist)
+    equities_trade, cashbal_nontrade = SplitCashBalance(cashbal, trade_hist)
     cashbal_entries = ProcessNonTradeCash(cashbal_nontrade)
 
     # Split up the "Futures Statements" table and process non-trade entries.
     futures = tables['Futures Statements']
-    futures_trade, futures_nontrade = SplitFuturesStatements(futures, tradehist)
+    futures_trade, futures_nontrade = SplitFuturesStatements(futures, trade_hist)
     futures_entries = ProcessNonTradeFutures(cashbal_nontrade)
 
     # Match up the equities and futures statements entries to the trade
     # history and ensure a perfect match, returning groups of (date-time,
     # cash-rows, trade-rows), properly matched.
     equities_groups, futures_groups = ProcessTradeHistory(
-        equities_trade, futures_trade, tradehist)
+        equities_trade, futures_trade, trade_hist)
 
     # Convert matched groups of rows to trnasctions.
     equities_txns = SplitGroupsToTransactions(equities_groups, False)

@@ -70,9 +70,8 @@ def _ParseFuturesSymbol(symbol: str) -> instrument.Instrument:
     root, fmonth, fyear = match.groups()
     underlying = f"/{root}{fmonth}{_DECADE}{fyear}"
     multiplier = futures.MULTIPLIERS[underlying[:-3]]
-    return instrument.Instrument(
-        underlying=underlying,
-        multiplier=multiplier)
+    return instrument.Instrument(underlying=underlying,
+                                 multiplier=multiplier)
 
 
 def _ParseFuturesOptionSymbol(symbol: str) -> instrument.Instrument:

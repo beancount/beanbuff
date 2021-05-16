@@ -222,11 +222,11 @@ def LoseFrac(p: Decimal) -> Decimal:
 def SynthesizeSymbol(r: Record) -> str:
     """Remove the symbol columns and replace them by a single symbol."""
     return str(instrument.FromColumns(r.underlying,
-                                   r.expiration,
-                                   r.expcode,
-                                   r.putcall,
-                                   r.strike,
-                                   r.multiplier))
+                                      r.expiration,
+                                      r.expcode,
+                                      r.putcall,
+                                      r.strike,
+                                      r.multiplier))
 
 
 def DebugPrint(tabledict):

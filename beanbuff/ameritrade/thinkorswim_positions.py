@@ -159,8 +159,8 @@ def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrume
         underlying = "{underlying}{month}".format(underlying, month, year)
         return instrument.Instrument(underlying=underlying,
                                      expcode=expcode,
-                                     strike=Decimal(strike),
                                      putcall=putcall[0],
+                                     strike=Decimal(strike),
                                      multiplier=int(multiplier))
 
     # Handle Equity Option, e.g.,
@@ -172,8 +172,8 @@ def ParseInstrumentDescription(string: str, symroot: str) -> instrument.Instrume
         expiration = parse(day_month_year).date()
         return instrument.Instrument(underlying=symroot,
                                      expiration=expiration,
-                                     strike=Decimal(strike),
                                      putcall=putcall[0],
+                                     strike=Decimal(strike),
                                      multiplier=100)
 
     # Handle Future, e.g.,
