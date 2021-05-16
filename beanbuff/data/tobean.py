@@ -28,7 +28,7 @@ from beancount.core import flags
 from beancount.parser import printer
 from beancount import loader
 
-from beanbuff.data import chains
+from johnny.base import chains
 from beanbuff.data import match
 from beanbuff.data import discovery
 from johnny.base.etl import petl, Table, Record, WrapRecords

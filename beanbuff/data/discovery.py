@@ -13,7 +13,7 @@ from johnny.base.etl import petl, Table
 
 from beanbuff.ameritrade import thinkorswim_positions
 from beanbuff.ameritrade import thinkorswim_transactions
-from beanbuff.data import chains
+from johnny.base import chains
 from beanbuff.data import match
 from beanbuff.tastyworks import tastyworks_positions
 from beanbuff.tastyworks import tastyworks_transactions

@@ -23,7 +23,7 @@ import click
 import flask
 
 from beanbuff.data import consolidated
-from beanbuff.data import chains as chainslib
+from johnny.base import chains as chainslib
 from johnny.base.etl import petl, Table, Record, WrapRecords
 
 
