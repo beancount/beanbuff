@@ -1,4 +1,10 @@
-# Instrument Fields
+# Canonical Instrument Representation
+
+We define a symbology for all instruments that is both independent of all the
+ones used by various brokers and which is also much easier to parse and read.
+
+
+## Component Fields
 
 The following fields are optional, and can be entirely inferred from the
 `symbol` field alone. These can be expanded from the symbol when specific
@@ -13,8 +19,9 @@ needed on its own.
   * `Future`
   * `Future Option`
 
-- `underlying: str`: The underlying instrument, with normalized name. (e.g., if
-  this is a futures, it will always include the decade.)
+- `underlying: str`: The underlying instrument, with normalized name. If this is
+  a futures instrument, includes the calendar month (and is normalized to
+  include the decade as well).
 
 - `expiration: Optional[datetime.date]`: The expiration date of an option. If
   this is an option on a future, this may not be present and need be inferred
@@ -37,3 +44,22 @@ needed on its own.
 
 The currency that the instrument is quoted in is not included; we assume the US
 dollar is the quoting currency so far.
+
+
+## Examples
+
+Equity:
+
+    TSLA
+
+Future:
+
+    /CLM21
+
+Equity Option:
+
+    SLV_210319_C25.5
+
+Future Option:
+
+    /CLM21_LOM21_C65

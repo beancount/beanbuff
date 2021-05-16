@@ -56,8 +56,9 @@ def Match(transactions: Table) -> Dict[str, str]:
         if r.rowtype == 'Expire':
             quantity = expire_map.get(r.transaction_id, None)
             if quantity is not None and r.quantity and r.quantity != abs(quantity):
-                raise ValueError("Invalid expiration quantity for row: "
-                                 "{} != {} from {}".format(r.quantity, abs(quantity), r))
+                raise ValueError(
+                    "Invalid expiration quantity for row: record={} != matches={} from {}"
+                    .format(r.quantity, abs(quantity), r))
         else:
             quantity = r.quantity
         return quantity
@@ -88,8 +89,8 @@ def _CreateMatchMappings(transactions: Table):
     for rec in transactions.records():
         instrument_key = InstKey(
             rec.account,
-            rec.symbol,
-            rec.instype, rec.underlying, rec.expiration, rec.expcode, rec.putcall,
+            rec.symbol, rec.instype,
+            rec.underlying, rec.expiration, rec.expcode, rec.putcall,
             rec.strike, rec.multiplier)
         inv = invs[instrument_key]
 
@@ -114,8 +115,8 @@ def _CreateClosingTransactions(invs: Mapping[str, Any], match_map: Dict[str, str
     """Create synthetic expiration and mark transactions to close matches."""
     closing_transactions = [(
         'account', 'transaction_id', 'rowtype', 'datetime', 'order_id',
-        'symbol',
-        'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
+        'symbol', 'instype',
+        'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
         'effect', 'instruction', 'quantity', 'price', 'cost', 'description',
         'commissions', 'fees'
     )]

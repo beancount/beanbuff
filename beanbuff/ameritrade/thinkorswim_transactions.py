@@ -228,6 +228,15 @@ def ProcessTradeHistory(equities_cash: Table,
     return equities_groups, futures_groups
 
 
+def _CreateInstrument(r: Record) -> str:
+    """Create an instrument from the expiration data."""
+    return beansym.FromColumns(r.underlying,
+                               r.expiration,
+                               r.expcode,
+                               r.putcall,
+                               r.strike,
+                               r.multiplier)
+
 
 def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
     """Look at cash table and extract and normalize expirations from it."""
@@ -237,6 +246,7 @@ def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
         .select(lambda r: re.match(r'REMOVAL OF OPTION DUE TO EXPIRATION', r.description))
         .addfield('_x', _ParseExpirationDescriptionDetailed)
         .convert('quantity', lambda _, r: r._x['quantity'], pass_row=True)
+        .rename('symbol' , 'symbol_in')
         .addfields([(name, lambda r, n=name: r._x.get(n)) for name in [
             'instype',
             'underlying',
@@ -249,6 +259,7 @@ def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
             'multiplier',
             'instruction']])
         .cutout('_x')
+        .addfield('symbol', lambda r: str(_CreateInstrument(r)))
 
         # Fix up the remaining fields.
         .addfield('order_id', None)
@@ -262,7 +273,7 @@ def ProcessExpirationsToTransactions(cash_table: Table) -> Table:
         # Clean up for the final table.
         .cut('datetime', 'order_id', 'rowtype',
              'effect', 'instruction',
-             'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike',
+             'symbol', 'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike',
              'multiplier',
              'quantity', 'price', 'commissions', 'fees', 'description')
     )
@@ -305,6 +316,7 @@ _TXN_FIELDS = ('datetime',
                'instruction',
                'effect',
 
+               'symbol',
                'instype',
                'underlying',
                'expiration',
@@ -375,10 +387,20 @@ def SplitGroupsToTransactions(groups: List[Group],
             description = cash_rows[0].description
             commissions = sum(crow.commissions_fees for crow in cash_rows)
             fees = sum(crow.misc_fees for crow in cash_rows)
+
             for index, trow in enumerate(trade_rows, start=1):
                 row_desc = ("{}  [{}/{}]".format(description, index, len(trade_rows))
                             if len(trade_rows) > 1
                             else description)
+                inst = beansym.FromColumns(
+                    trow.underlying,
+                    trow.expiration,
+                    trow.expcode,
+                    trow.putcall,
+                    trow.strike,
+                    trow.multiplier)
+                symbol = str(inst)
+
                 txn = (trow.exec_time,
                        trow.order_id,
                        trow.pair_id,
@@ -386,6 +408,8 @@ def SplitGroupsToTransactions(groups: List[Group],
                        trow.side,
                        trow.pos_effect,
 
+                       symbol,
+                       # TODO(blais): Remove these.
                        trow.instype,
                        trow.underlying,
                        trow.expiration,
@@ -541,6 +565,7 @@ def AccountTradeHistory_Prepare(table: Table) -> Table:
         .addfield('strike', lambda r: r._instrument.strike)
         .addfield('multiplier', lambda r: Decimal(r._instrument.multiplier))
         .cutout('symbol', 'exp', 'strike', 'type')
+        .addfield('symbol', lambda r: str(r._instrument))
         .cutout('_instrument')
 
         # Remove unnecessary fields.
@@ -803,11 +828,13 @@ def _ParseExpirationDescriptionDetailed(rec: Record) -> Dict[str, Any]:
     match = re.match(regexp, rec.description)
     assert match, description
     matches = match.groupdict()
+
     underlying = matches['underlying']
     matches['instype'] = 'Future Option' if underlying.startswith('/') else 'Equity Option'
     matches['expiration'] = parser.parse(matches['expiration']).date()
     matches['strike'] = Decimal(matches['strike'])
     matches['multiplier'] = Decimal(matches['multiplier'])
+
     signed_quantity = Decimal(matches['quantity'])
     matches['quantity'] = abs(signed_quantity)
     matches['instruction'] = 'SELL' if signed_quantity < ZERO else 'BUY'
@@ -884,13 +911,21 @@ def GetTransactions(filename: str) -> Tuple[Table, Table]:
             .convert('order_id', lambda oid: 'T{}'.format(oid) if oid else oid))
 
     # Make the final ordering correct and finalize the columns.
-    txns = (txns
-            .cut('account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
-                 'instype', 'underlying', 'expiration', 'expcode', 'putcall', 'strike',
-                 'multiplier',
-                 'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees',
-                 'description',
-                 ))
+    txns = (
+        txns.cut(
+            # Event info
+            'account', 'transaction_id', 'datetime', 'rowtype', 'order_id',
+
+            # Instrument info
+            'symbol', 'instype',
+            'underlying', 'expiration', 'expcode', 'putcall', 'strike', 'multiplier',
+
+            # Balance info
+            'effect', 'instruction', 'quantity', 'price', 'cost', 'commissions', 'fees',
+
+            # Descriptive info
+            'description',
+        ))
 
     cash_accounts = petl.cat(cashbal_entries, futures_entries)
 

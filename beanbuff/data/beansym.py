@@ -9,6 +9,11 @@ from typing import List, NamedTuple, Optional
 
 
 
+# TODO(blais): Normalize all this to include the calendar months in the
+# underlying and match the fields in instrument.md.
+
+
+
 # TODO(blais): Add methods to create each of the subtypes of instruments, with
 # validation.
 #
