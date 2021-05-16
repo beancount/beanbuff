@@ -29,7 +29,7 @@ from beancount.parser import printer
 from beancount import loader
 
 from johnny.base import chains
-from beanbuff.data import match
+from johnny.base import match
 from beanbuff.data import discovery
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data.discovery import GetTransactions

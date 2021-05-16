@@ -6,7 +6,7 @@ import datetime
 import functools
 
 from johnny.base import chains
-from beanbuff.data import match
+from johnny.base import match
 from johnny.base import instrument
 from johnny.base.etl import Record, Table, petl
 
