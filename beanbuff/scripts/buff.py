@@ -22,7 +22,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import click
 import flask
 
-from beanbuff.data import consolidated
+from johnny.base import consolidate
 from johnny.base import chains as chainslib
 from johnny.base.etl import petl, Table, Record, WrapRecords
 
@@ -55,7 +55,7 @@ def Initialize():
     global STATE
     with _STATE_LOCK:
         if STATE is None:
-            transactions, positions, chains = consolidated.ConsolidateChains(
+            transactions, positions, chains = consolidate.ConsolidateChains(
                 fileordirs, ledger)
             STATE = State(transactions, positions, chains)
     return STATE

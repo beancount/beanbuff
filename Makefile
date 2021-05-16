@@ -25,7 +25,7 @@ $(IMPORTERS:.py=.test) : %.test : beanbuff/%.py
 
 
 chains:
-	python3 -m beanbuff.data.consolidated $(HOME) --inactive
+	python3 -m johnny.base.consolidate $(HOME) --inactive
 
 buff:
 	FLASK_ENV=development FLASK_APP=beanbuff.scripts.buff flask run

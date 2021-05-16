@@ -33,7 +33,7 @@ from johnny.base import match
 from johnny.base import discovery
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data.discovery import GetTransactions
-from beanbuff.data import consolidated
+from johnny.base import consolidate
 
 
 def ConvertTrade(rec: Record, config: Dict[str, str]) -> data.Transaction:
@@ -167,7 +167,7 @@ def main(config: str, ledger: str, fileordirs: List[str],
 
     # Add symbol.
     transactions = (transactions
-                    .addfield('symbol', consolidated.SynthesizeSymbol))
+                    .addfield('symbol', consolidate.SynthesizeSymbol))
 
     # Convert to transactions, unconditionally.
     undermap = collections.defaultdict(list)
