@@ -30,7 +30,7 @@ from beancount import loader
 
 from johnny.base import chains
 from johnny.base import match
-from beanbuff.data import discovery
+from johnny.base import discovery
 from johnny.base.etl import petl, Table, Record, WrapRecords
 from beanbuff.data.discovery import GetTransactions
 from beanbuff.data import consolidated

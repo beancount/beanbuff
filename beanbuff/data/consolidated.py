@@ -27,7 +27,7 @@ from beancount import loader
 from beancount.core import data
 
 from johnny.base.etl import petl, Table, Record, WrapRecords
-from beanbuff.data import discovery
+from johnny.base import discovery
 from johnny.base import instrument
 
 
