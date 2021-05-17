@@ -34,24 +34,7 @@ import typing
 import click
 from dateutil import parser
 
-from beancount.core.number import ZERO
-from beancount.core.number import ONE
-from beancount.core.amount import Amount
-from beancount.core.inventory import Inventory
-from beancount.core import data
-from beancount.core import position
-from beancount.core import inventory
-from beancount.core import flags
-from beancount.core.number import D
-from beancount.core.number import ZERO
-from beancount.core.number import MISSING
 from beancount.utils import csv_utils
-from beancount.utils.snoop import save
-
-from beangulp import testing
-from beangulp.importers.mixins import config
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
 
 from beanbuff.ameritrade import thinkorswim_utils as utils
 from johnny.base.etl import petl, Table, Record, WrapRecords
@@ -67,6 +50,7 @@ Table = petl.Table
 Record = petl.Record
 debug = False
 Config = Any
+ZERO = Decimal(0)
 
 
 # Symbol name changes sometimes occur out of sync in the TOS platform. You may
@@ -122,12 +106,12 @@ def SplitFuturesStatements(futures: Table, tradehist: Table) -> Tuple[Table, Tab
     return trade, nontrade
 
 
-def ProcessNonTradeCash(nontrade: Table) -> data.Entries:
+def ProcessNonTradeCash(nontrade: Table) -> Any:
     """Produce the non-trade 'Cash Balance' entries."""
     # TODO(blais):
     return nontrade
 
-def ProcessNonTradeFutures(nontrade: Table) -> data.Entries:
+def ProcessNonTradeFutures(nontrade: Table) -> Any:
     """Produce the non-trade 'Futures Statements' entries."""
     # TODO(blais):
     return nontrade
