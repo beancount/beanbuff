@@ -12,9 +12,9 @@ from beancount.core.number import D
 from beancount.core.number import ZERO
 from beancount.core import data
 from beancount.core import amount
-from beancount.utils import csv_utils
 from beancount.ops import compress
 
+from beangulp import csv_utils
 from beangulp import testing
 from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing

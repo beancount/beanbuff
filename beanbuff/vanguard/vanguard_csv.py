@@ -21,8 +21,8 @@ from beancount.core.amount import Amount
 from beancount.core.data import EMPTY_SET
 from beancount.core.number import D
 from beancount.core.number import ZERO
-from beancount.utils import csv_utils
 
+from beangulp import csv_utils
 from beangulp import testing
 from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
