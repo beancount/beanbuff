@@ -227,6 +227,15 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin)
 
                 entries.append(txn)
 
+            elif ttype == 'Sell to open' or ttype == 'Buy to close' or ttype == 'Transfer (outgoing)':
+                assert row['Accrued Interest'] == ZERO
+                logging.critical("TODO(blais): Support not implemented for {}.".format(row))
+                entries.append(txn)
+
+            elif ttype == 'Transfer (outgoing)':
+                logging.critical("TODO(blais): Support not implemented for {}.".format(row))
+                entries.append(txn)
+
             elif ttype in {'Capital gain (LT)', 'Capital gain (ST)'}:
                 assert re.match(r'(Long|Short)-Term Capital Gains Distribution', tdesc)
                 assert row['Commission Fees'] == ZERO
