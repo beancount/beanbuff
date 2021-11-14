@@ -7,6 +7,7 @@ option).
 import re
 import datetime
 import collections
+from decimal import Decimal
 
 from beancount.core.number import D
 from beancount.core.number import ZERO
@@ -79,10 +80,12 @@ FXGlobalTransfer Fee
 P/L Correction
 Interest Correction
 Balance Correction
+Inactivity Fee
+Fund Withdrawal (System Migration)
 """.strip().splitlines()
 
 
-def find_changing_types(filename):
+def find_changing_types(filename: str):
     bytype = collections.defaultdict(list)
     with open(filename) as infile:
         for obj in csv_utils.csv_dict_reader(infile):
@@ -120,7 +123,7 @@ def get_number(obj, aname):
         return D()
 
 
-def reset_balance(txntype):
+def is_unbalanced(txntype):
     """Return true if the balance cannot be assumed to be balanced.
 
     Args:
@@ -134,7 +137,39 @@ def reset_balance(txntype):
             txntype.startswith('API ') or
             txntype.endswith('Correction') or
             re.search(txntype, 'Wire Fee') or
-            re.search(txntype, 'FXGlobalTransfer Fee'))
+            re.search(txntype, 'FXGlobalTransfer Fee') or
+            txntype == 'Inactivity Fee')
+
+
+def get_sign_from_balance(txntype: str, amount_amount: Decimal, reported_balance: Decimal, prev_balance: Decimal) -> int:
+    """Get the sign of the amount."""
+    reported_change = reported_balance - prev_balance
+    for sign in (+1, -1):
+        diff = sign * amount_amount - reported_change
+        if abs(diff) < TOLERANCE:
+            break
+    else:
+        raise ValueError("Cannot use straight-up amount, "
+                         "too far from zero: {} {}".format(amount_amount,
+                                                           reported_change))
+    return sign
+
+
+def get_sign(txntype: str, amount_amount: Decimal, reported_balance: Decimal, prev_balance: Decimal) -> int:
+    """Get the sign of the amount."""
+    sign_from_balance = get_sign_from_balance(txntype, amount_amount, reported_balance, prev_balance)
+    return sign_from_balance
+
+    # TODO: continue here.
+    try:
+        sign = {
+            'FXGlobalTransfer Sent': +1,
+            'FXGlobalTransfer Fee': -1,
+        }[txntype]
+    except KeyError as exc:
+        raise KeyError(f"sign_from_balance: {sign_from_balance}") from exc
+    assert -sign == sign_from_balance, (sign, -sign_from_balance)
+    return -sign
 
 
 TOLERANCE = D('0.01')
@@ -150,6 +185,7 @@ LINK_FORMAT = 'oanda-{}'
 # things to do (that being said, it's _almost_ working for that time, so just
 # change this if you want it).
 FIRST_DATE = datetime.date(2009, 1, 1)
+
 
 def guess_currency(filename):
     """Try to guess the base currency of the account.
@@ -174,9 +210,7 @@ def yield_records(filename, config):
       filename: a string, the name of the file to parse.
       config: A configuration directory.
     Yields:
-      Records of the form:
-
-
+      Records.
     """
     # Sort all the lines and compute the dates.
     with open(filename) as infile:
@@ -200,11 +234,19 @@ def yield_records(filename, config):
                 continue
             assert txntype in RELEVANT_TRANSACTIONS, txntype
 
-            # Get the change amounts.
+            # Get the possible amounts.
             amount_interest = get_number(obj, 'interest')
             amount_pnl = get_number(obj, 'pl')
             amount_amount = get_number(obj, 'amount')
             amount_other = ZERO
+
+            if is_unbalanced(txntype):
+                if txntype == 'Interest':
+                    assert amount_pnl == ZERO
+                    assert amount_amount == ZERO, obj
+                    assert amount_other == ZERO
+                else:
+                    assert amount_interest == ZERO
 
             # The balance reported.
             reported_balance = get_number(obj, 'balance')
@@ -212,20 +254,13 @@ def yield_records(filename, config):
             # Compute the new balance and the final amounts.
             if prev_balance is None:
                 # For the first line, set the balance to the first reported balance.
-                prev_balance = reported_balance - (amount_pnl + amount_interest + amount_other)
+                prev_balance = reported_balance - (
+                    amount_pnl + amount_interest + amount_other)
 
-            elif reset_balance(txntype):
+            elif is_unbalanced(txntype):
                 # For special unbalancing transactions, check which sign we should
                 # be applying.
-                reported_change = reported_balance - prev_balance
-                for sign in (+1, -1):
-                    diff = sign * amount_amount - reported_change
-                    if abs(diff) < TOLERANCE:
-                        break
-                else:
-                    raise ValueError("Cannot use straight-up amount, "
-                                     "too far from zero: {} {}".format(amount_amount,
-                                                                       reported_change))
+                sign = get_sign(txntype, amount_amount, reported_balance, prev_balance)
 
                 amount_other = sign * amount_amount
                 amount_pnl = ZERO
