@@ -32,6 +32,7 @@ from beancount.core.number import D
 from beancount.core import amount
 from beancount.core import data
 from beangulp import importer
+from beangulp import cache
 
 
 class BalanceType(enum.Enum):
@@ -42,7 +43,7 @@ class BalanceType(enum.Enum):
                  # extracted transaction.
 
 
-class Importer(importer.ImporterProtocol):
+class Importer(importer.Importer):
     """An importer for Open Financial Exchange files."""
 
     def __init__(self, acctid_regexp, account, basename=None,
@@ -61,12 +62,14 @@ class Importer(importer.ImporterProtocol):
         self.basename = basename
         self.balance_type = balance_type
 
+    @property
     def name(self):
         """Include the filing account in the name."""
         return '{}: "{}"'.format(super().name(), self.file_account(None))
 
-    def identify(self, file):
+    def identify(self, filepath):
         # Match for a compatible MIME type.
+        file = cache.get_file(filepath)
         if file.mimetype() not in {'application/x-ofx',
                                    'application/vnd.intu.qbo',
                                    'application/vnd.intu.qfx'}:
@@ -76,21 +79,23 @@ class Importer(importer.ImporterProtocol):
         return any(re.match(self.acctid_regexp, acctid)
                    for acctid in find_acctids(file.contents()))
 
-    def file_account(self, _):
+    def account(self, filepath):
         """Return the account against which we post transactions."""
         return self.account
 
-    def file_name(self, file):
+    def date(self, filepath):
         """Return the optional renamed account filename."""
-        if self.basename:
-            return self.basename + path.splitext(file.name)[1]
-
-    def file_date(self, file):
-        """Return the optional renamed account filename."""
+        file = cache.get_file(filepath)
         return find_max_date(file.contents())
 
-    def extract(self, file, existing_entries=None):
+    def filename(self, filepath):
+        """Return the optional renamed account filename."""
+        if self.basename:
+            return self.basename + path.splitext(filepath)[1]
+
+    def extract(self, filepath, existing):
         """Extract a list of partially complete transactions from the file."""
+        file = cache.get_file(filepath)
         soup = bs4.BeautifulSoup(file.contents(), 'lxml')
         return extract(soup, file.name, self.acctid_regexp, self.account, self.FLAG,
                        self.balance_type)
