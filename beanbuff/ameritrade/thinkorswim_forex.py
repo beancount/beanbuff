@@ -58,12 +58,12 @@ class Importer(beangulp.Importer):
         self.config = config
         utils.validate_accounts(CONFIG, config)
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         return (utils.is_mimetype(filepath, 'text/csv') and
                 utils.search_file_regexp(filepath, '', nbytes=4096))
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def filename(self, filepath: str) -> Optional[str]:
         return 'thinkorswim_forex.{}'.format(path.basename(filepath))

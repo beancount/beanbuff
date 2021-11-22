@@ -23,13 +23,13 @@ class Importer(beangulp.Importer):
     def __init__(self, filing: str):
         self._account = filing
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         if utils.is_mimetype(filepath, 'application/pdf'):
             contents = convert_to_text(filepath)
             return re.search('Fidelity Brokerage Services', contents)
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def filename(self, filepath: str) -> Optional[str]:
         return 'fidelity.{}'.format(path.basename(filepath))

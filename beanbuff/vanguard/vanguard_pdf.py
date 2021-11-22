@@ -31,14 +31,14 @@ class Importer(beangulp.Importer):
     def __init__(self, filing: str):
         self._account = filing
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         if utils.is_mimetype(filepath, 'application/pdf'):
             contents = convert_to_text(filepath)
             return all(re.search(x, contents) for x in [
                 "Vanguard", "vanguard.com", r'INC. 401\(K\) SAVINGS PLAN'])
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def date(self, filepath: str) -> Optional[datetime.date]:
         contents = convert_to_text(filepath)

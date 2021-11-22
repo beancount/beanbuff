@@ -25,14 +25,14 @@ class Importer(beangulp.Importer):
         self._account = filing
         self.account_id = account_id
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         if utils.is_mimetype(filepath, 'application/pdf'):
             contents = convert_to_text(filepath)
             if re.search(r'OANDA Corporation', contents):
                 return bool(re.search(rf'\b{self.account_id}\b', contents))
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def date(self, filepath: str) -> Optional[datetime.date]:
         contents = convert_to_text(filepath)

@@ -49,13 +49,13 @@ class Importer(beangulp.Importer):
         self._account = filing
         self.config = config
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         return (utils.is_mimetype(filepath, 'application/vnd.ms-excel') and
                 # Check if the spreadsheet has the sheet name we're looking for.
                 xls_utils.open_sheet(filepath, SHEET_NAME) != None)
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def date(self, filepath: str) -> Optional[datetime.date]:
         pass # TODO(blais):

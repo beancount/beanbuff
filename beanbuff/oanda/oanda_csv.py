@@ -44,13 +44,13 @@ class Importer(beangulp.Importer):
         self.config = config
         utils.validate_accounts(CONFIG, config)
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         return (utils.is_mimetype(filepath, 'text/csv') and
                 utils.search_file_regexp(
                     filepath, 'Transaction ID.*Currency Pair.*Pipettes', nbytes=1024))
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     # def date(self, filepath: str) -> Optional[datetime.date]:
     #     return get_date(contents)

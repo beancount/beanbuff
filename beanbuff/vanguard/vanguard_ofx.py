@@ -54,15 +54,15 @@ class Importer(beangulp.Importer):
         self.config = config
         utils.validate_accounts(CONFIG, config)
 
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
     def identify(self, filepath: str) -> bool:
         return (utils.is_mimetype(filepath, {'application/x-ofx',
                                              'application/vnd.intu.qfx'}) and
                 utils.search_file_regexp(filepath, r"Vanguard", encoding='cp1252') and
                 utils.search_file_regexp(
                     filepath, r"<ACCTID>{}".format(self._account_id), encoding='cp1252'))
-
-    def account(self, filepath: str) -> data.Account:
-        return self._account
 
     def date(self, filepath: str) -> Optional[datetime.date]:
         return None

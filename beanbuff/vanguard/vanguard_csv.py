@@ -309,11 +309,11 @@ class Importer(beangulp.Importer):
         self.config = config
         utils.validate_accounts(CONFIG, config)
 
-    def identify(self, filepath: str) -> bool:
-        return utils.search_file_regexp(filepath, *HANDLERS.keys(), encoding='iso-8859-1')
-
     def account(self, filepath: str) -> data.Account:
         return self._account
+
+    def identify(self, filepath: str) -> bool:
+        return utils.search_file_regexp(filepath, *HANDLERS.keys(), encoding='iso-8859-1')
 
     def date(self, filepath: str) -> Optional[datetime.date]:
         return None

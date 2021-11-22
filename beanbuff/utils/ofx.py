@@ -67,6 +67,9 @@ class Importer(importer.Importer):
         """Include the filing account in the name."""
         return '{}: "{}"'.format(super().name(), self.file_account(None))
 
+    def account(self, filepath):
+        return self.account
+
     def identify(self, filepath):
         # Match for a compatible MIME type.
         file = cache.get_file(filepath)
@@ -78,10 +81,6 @@ class Importer(importer.Importer):
         # Match the account id.
         return any(re.match(self.acctid_regexp, acctid)
                    for acctid in find_acctids(file.contents()))
-
-    def account(self, filepath):
-        """Return the account against which we post transactions."""
-        return self.account
 
     def date(self, filepath):
         """Return the optional renamed account filename."""
