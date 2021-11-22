@@ -1,3 +1,5 @@
+# TODO(blais): This isn't up-to-date. Port this to use Johnny.
+
 """Think-or-Swim "Account Statement" CSV detail importer.
 
 Instructions:
@@ -47,9 +49,6 @@ from beancount.utils import csv_utils
 from beancount.utils.snoop import save
 
 from beangulp import testing
-from beangulp.importers.mixins import config
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
 
 from johnny.base import futures
 from johnny.base import instrument

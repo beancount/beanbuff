@@ -1,3 +1,5 @@
+# TODO(blais): This isn't up-to-date. Port this to use Johnny.
+
 """Extractor for Interactive Brokers Activity Report in CSV format.
 
   Login > Reports > Flex Report > (period) > Run
@@ -35,9 +37,6 @@ from beancount.core import position
 from beancount.core import account as accountlib
 
 from beangulp import testing
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
-from beangulp.importers.mixins import config as configlib
 
 
 Rows = List[List[str]]
