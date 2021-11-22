@@ -8,38 +8,58 @@ import re
 import datetime
 import collections
 from decimal import Decimal
+from typing import Dict, Optional
+from os import path
 
 from beancount.core.number import D
 from beancount.core.number import ZERO
 from beancount.core import data
 from beancount.core import amount
+from beancount.core import flags
 from beancount.ops import compress
 
 from beangulp import csv_utils
+from beangulp import petl_utils
 from beangulp import testing
-from beangulp.importers.mixins import config
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
+from beangulp import utils
+import beangulp
 
 
-class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin):
 
-    REQUIRED_CONFIG = {
-        'asset'    : 'Account holding the cash margin',
-        'interest' : 'Interest income',
-        'pnl'      : 'PnL income',
-        'transfer' : 'Other account for wire transfers',
-        'limbo'    : "Account used to book against transfer where we don't know",
-        'fees'     : 'Wire and API fees',
-    }
+CONFIG = {
+    'asset'    : 'Account holding the cash margin',
+    'interest' : 'Interest income',
+    'pnl'      : 'PnL income',
+    'transfer' : 'Other account for wire transfers',
+    'limbo'    : "Account used to book against transfer where we don't know",
+    'fees'     : 'Wire and API fees',
+}
 
-    matchers = [
-        ('mime', 'text/csv'),
-        ('content', 'Transaction ID.*Currency Pair.*Pipettes'),
-    ]
 
-    def extract(self, file):
-        return import_csv_file(file.name, self.config, flag=self.FLAG)
+class Importer(beangulp.Importer):
+
+    def __init__(self, filing: str, account_id: str, config: Dict[str, str]):
+        self._account = filing
+        self.account_id = account_id
+        self.config = config
+        utils.validate_accounts(CONFIG, config)
+
+    def identify(self, filepath: str) -> bool:
+        return (utils.is_mimetype(filepath, 'text/csv') and
+                utils.search_file_regexp(
+                    filepath, 'Transaction ID.*Currency Pair.*Pipettes', nbytes=1024))
+
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
+    # def date(self, filepath: str) -> Optional[datetime.date]:
+    #     return get_date(contents)
+
+    def filename(self, filepath: str) -> Optional[str]:
+        return 'oanda.{}'.format(path.basename(filepath))
+
+    def extract(self, filepath: str, existing: data.Entries) -> data.Entries:
+        return import_csv_file(filepath, self.config, flag=flags.FLAG_OKAY)
 
 
 IGNORE_TRANSACTIONS = """
@@ -378,7 +398,7 @@ def import_csv_file(filename, config, do_compress=True, flag='*'):
 
 
 if __name__ == '__main__':
-    importer = Importer(filing='Assets:US:OANDA:Primary', config={
+    importer = Importer(filing='Assets:US:OANDA:Primary', account_id='9', config={
         'asset'    : 'Assets:US:OANDA:Primary',
         'interest' : 'Income:US:OANDA:Primary:Interest',
         'pnl'      : 'Income:US:OANDA:Primary:PnL',

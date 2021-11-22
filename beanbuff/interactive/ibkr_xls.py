@@ -1,10 +1,13 @@
 """Extractor for XLS files from Interactive Brokers.
 
+TODO(blais): Convert this to using the completed importer in Johnny.
 """
 
 import collections
 import datetime
 from pprint import pprint
+from os import path
+from typing import Dict, Optional
 
 from beancount.core.number import D
 from beancount.core.number import ZERO
@@ -13,48 +16,58 @@ from beancount.core import flags
 from beancount.core import amount
 from beancount.core import position
 
+from beanglers.mssb import xls_utils  # TODO(blais): Move to public.
+from beangulp import petl_utils
 from beangulp import testing
+from beangulp import utils
 from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
+import beangulp
 
-from beanglers.mssb import xls_utils
+
+CONFIG = {
+    'asset_cash'         : 'Cash account',
+    'transfer'           : 'Other account for inter-bank transfers',
+}
 
 
-class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin):
+def extract(filepath: str, config: Dict[str, str]) -> data.Entries:
+    sheet = xls_utils.open_sheet(filepath, SHEET_NAME)
+    header, rows = xls_utils.extract_table(sheet)
+    entries = []
+    for index, row in enumerate(rows):
+        meta = data.new_metadata(filepath, index)
+        if row.method == 'ACH':  # Process deposit.
+            entry = process_deposit(row, meta, config)
+        else:
+            raise ValueError("Unknown row type: {}".format(row))
+        entries.append(entry)
+    return entries
 
-    REQUIRED_CONFIG = {
-        'asset_cash'         : 'Cash account',
-        'transfer'           : 'Other account for inter-bank transfers',
-    }
 
-    SHEET_NAME = r'Deposit'
+class Importer(beangulp.Importer):
 
-    # Number of days back to render.
-    DAYS_BACK = 180
+    def __init__(self, filing, config):
+        self._account = filing
+        self.config = config
 
-    matchers = [('mime', 'application/vnd.ms-excel')]
+    def identify(self, filepath: str) -> bool:
+        return (utils.is_mimetype(filepath, 'application/vnd.ms-excel') and
+                # Check if the spreadsheet has the sheet name we're looking for.
+                xls_utils.open_sheet(filepath, SHEET_NAME) != None)
 
-    def identify(self, file):
-        if not super().identify(file):
-            return False
-        # Check if the spreadsheet has the sheet name we're looking for.
-        return xls_utils.open_sheet(file.name, self.SHEET_NAME) != None
+    def account(self, filepath: str) -> data.Account:
+        return self._account
 
-    def extract(self, file):
-        sheet = xls_utils.open_sheet(file.name, self.SHEET_NAME)
-        header, rows = xls_utils.extract_table(sheet)
+    def date(self, filepath: str) -> Optional[datetime.date]:
+        pass # TODO(blais):
 
-        entries = []
-        for index, row in enumerate(rows):
-            meta = data.new_metadata(file.name, index)
-            if row.method == 'ACH':  # Process deposit.
-                entry = process_deposit(row, meta, self.config)
-            else:
-                raise ValueError("Unknown row type: {}".format(row))
-            entries.append(entry)
-            
-        return entries
+    def filename(self, filepath: str) -> Optional[str]:
+        return 'ibkr.{}'.format(path.basename(filepath))
+
+    def extract(self, filepath: str, existing: data.Entries) -> data.Entries:
+        return extract(filepath, self.config)
 
 
 def process_deposit(row, meta, config):

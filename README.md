@@ -12,13 +12,17 @@ allow centralized analysis of performance in aggregate, across multiple brokers.
 
 ## Status
 
-This is work in constant progress. It's rough around the edges and is
-specifically designed for my personal reconciliation workflow. Use it at your
-own peril or benefit.
+This is work in progress. It's rough around the edges and is specifically
+designed for my personal reconciliation workflow. Use it at your own peril or
+benefit.
 
 NOTE: Many of these importers are currently being rewritten and reconsolidated
 in order to perform centralized analysis. Therefore, some of the stuff will not
 be in working order as of March 2021.
+
+UPDATE(2021-11-21): Many of the importers in here have been superseded by
+implementations in Johnny (http://github.com/beancount/johnny). There will
+eventually be a dependency from this repository to it. This is in flux.
 
 
 ## Testing

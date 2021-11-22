@@ -1,26 +1,48 @@
-"""RBC Checking, Savings and Credit Card PDF statements importer.
+"""OANDA PDF reports.
 """
+import datetime
 import re
+from typing import Optional
+from os import path
 
 import dateutil.parser
 
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
+from beancount.core import data
+
+import beangulp
 from beangulp import testing
-
 from beanbuff.utils import pdf
+from beangulp import petl_utils
+from beangulp import utils
 
 
-class Importer(identifier.IdentifyMixin, filing.FilingMixin):
+convert_to_text = pdf.convert_pdf_to_text
 
-    matchers = [('mime', 'application/pdf'),
-                ('content', 'OANDA Corporation')]
 
-    converter = staticmethod(pdf.convert_pdf_to_text)
+class Importer(beangulp.Importer):
 
-    def file_date(self, file):
-        filename = file.name
-        text = file.convert(self.converter)
+    def __init__(self, filing: str, account_id: str):
+        self._account = filing
+        self.account_id = account_id
+
+    def identify(self, filepath: str) -> bool:
+        if utils.is_mimetype(filepath, 'application/pdf'):
+            contents = convert_to_text(filepath)
+            if re.search(r'OANDA Corporation', contents):
+                return bool(re.search(rf'\b{self.account_id}\b', contents))
+
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
+    def date(self, filepath: str) -> Optional[datetime.date]:
+        contents = convert_to_text(filepath)
+        return get_date(contents)
+
+    def filename(self, filepath: str) -> Optional[str]:
+        return 'oanda.{}'.format(path.basename(filepath))
+
+
+def get_date(text: str) -> datetime.date:
         match = re.search(r'Statement Period.*'
                           r'Account Number.*'
                           r'([A-Z][a-z][a-z] \d\d) - ([A-Z][a-z][a-z] \d\d), (\d\d\d\d)',
@@ -30,5 +52,5 @@ class Importer(identifier.IdentifyMixin, filing.FilingMixin):
 
 
 if __name__ == '__main__':
-    importer = Importer(filing='Assets:US:OANDA:Hedging')
+    importer = Importer(filing='Assets:US:OANDA:Hedging', account_id='9')
     testing.main(importer)

@@ -19,14 +19,8 @@ IMPORTERS =					\
 	lendingclub/lendingclub_pdf.py
 
 IMPORTERS =					\
-	ameritrade/thinkorswim_forex.py
+	vanguard/vanguard_csv.py
 
-	# tastyworks/tastyworks_csv.py
-	# ibkr/ibkr_xls.py
-	# ibkr/ibkr_flex_reports_csv.py
-	# oanda/oanda_csv.py
-	# oanda/oanda_pdf.py
-	# vanguard/vanguard_csv.py
 	# vanguard/vanguard_ofx.py
 	# vanguard/vanguard_pdf.py
 	# fidelity/fidelity_pdf.py

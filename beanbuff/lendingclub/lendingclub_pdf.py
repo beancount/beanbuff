@@ -10,7 +10,6 @@ from dateutil.parser import parse as parse_datetime
 from beancount.core import data
 
 from beanbuff.utils import pdf
-from beanglers.tools import pdfconvert
 from beangulp import testing
 from beangulp import utils
 from beangulp.importers.mixins import filing
@@ -18,7 +17,7 @@ from beangulp.importers.mixins import identifier
 import beangulp
 
 
-convert_to_text = pdfconvert.convert_to_text
+convert_to_text = pdf.convert_pdf_to_text
 
 
 def get_date(text: str) -> datetime.date:
