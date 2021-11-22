@@ -19,11 +19,7 @@ IMPORTERS =					\
 	lendingclub/lendingclub_pdf.py
 
 IMPORTERS =					\
-	vanguard/vanguard_csv.py
-
-	# vanguard/vanguard_ofx.py
-	# vanguard/vanguard_pdf.py
-	# fidelity/fidelity_pdf.py
+	fidelity/fidelity_pdf.py
 
 test: $(IMPORTERS:.py=.test)
 

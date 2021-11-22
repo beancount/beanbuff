@@ -1,33 +1,53 @@
 """Vanguard PDF statement importer.
 """
+
+from os import path
+from typing import Optional
+import datetime
 import re
 
 import dateutil.parser
 
-from beangulp import testing
-from beangulp.importers.mixins import filing
-from beangulp.importers.mixins import identifier
+from beancount.core import data
 
 from beanbuff.utils import pdf
+from beangulp import petl_utils
+from beangulp import testing
+from beangulp import utils
+from beangulp.importers.mixins import filing
+from beangulp.importers.mixins import identifier
+import beangulp
 
 
-class Importer(identifier.IdentifyMixin, filing.FilingMixin):
+convert_to_text = pdf.convert_pdf_to_text
 
-    matchers = [
-        ('mime', 'application/pdf'),
-        ('content', 'Vanguard'),
-        ('content', 'vanguard.com'),
-        ('content', r'INC. 401\(K\) SAVINGS PLAN'),
-    ]
 
-    converter = staticmethod(pdf.convert_pdf_to_text)
+def get_date(text: str) -> datetime.date:
+    match = re.search(r'ACCOUNT SUMMARY: (\d\d/\d\d/\d\d\d\d) - (\d\d/\d\d/\d\d\d\d)', text)
+    assert match, "Expected date not found in file."
+    return dateutil.parser.parse(match.group(2)).date()
 
-    def file_date(self, file):
-        filename = file.name
-        text = file.convert(pdf.convert_pdf_to_text)
-        match = re.search(r'ACCOUNT SUMMARY: (\d\d/\d\d/\d\d\d\d) - (\d\d/\d\d/\d\d\d\d)', text)
-        assert match, "Expected date not found in file."
-        return dateutil.parser.parse(match.group(2)).date()
+
+class Importer(beangulp.Importer):
+
+    def __init__(self, filing: str):
+        self._account = filing
+
+    def identify(self, filepath: str) -> bool:
+        if utils.is_mimetype(filepath, 'application/pdf'):
+            contents = convert_to_text(filepath)
+            return all(re.search(x, contents) for x in [
+                "Vanguard", "vanguard.com", r'INC. 401\(K\) SAVINGS PLAN'])
+
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
+    def date(self, filepath: str) -> Optional[datetime.date]:
+        contents = convert_to_text(filepath)
+        return get_date(contents)
+
+    def filename(self, filepath: str) -> Optional[str]:
+        return 'vanguard.{}'.format(path.basename(filepath))
 
 
 if __name__ == '__main__':
