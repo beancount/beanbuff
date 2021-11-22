@@ -8,15 +8,21 @@ import re
 import itertools
 import datetime
 import collections
+from typing import Optional
+from os import path
 
 from beancount.core import data
+from beancount.core import flags
 from beancount.core.number import D, ZERO
-from beancount.utils import csv_utils
 
+from beangulp import csv_utils
+from beangulp import petl_utils
 from beangulp import testing
+from beangulp import utils
 from beangulp.importers.mixins import config
 from beangulp.importers.mixins import filing
 from beangulp.importers.mixins import identifier
+import beangulp
 
 
 debug = False
@@ -36,39 +42,59 @@ def convert_number(string):
     return number * sign
 
 
-class Importer(identifier.IdentifyMixin, filing.FilingMixin, config.ConfigMixin):
+CONFIG = {
+    'cash_currency'      : 'Currency used for cash account',
+    'asset_cash'         : 'Cash account',
+    #'asset_position'     : 'Root account for all position sub-accounts',
+    'fees'               : 'Fees',
+    'commission'         : 'Commissions',
+    'interest'           : 'Interest income',
+    'pnl'                : 'Capital Gains/Losses',
+    'transfer'           : 'Other account for inter-bank transfers',
+}
 
-    REQUIRED_CONFIG = {
-        'cash_currency'      : 'Currency used for cash account',
-        'asset_cash'         : 'Cash account',
-        #'asset_position'     : 'Root account for all position sub-accounts',
-        'fees'               : 'Fees',
-        'commission'         : 'Commissions',
-        'interest'           : 'Interest income',
-        'pnl'                : 'Capital Gains/Losses',
-        'transfer'           : 'Other account for inter-bank transfers',
-    }
 
-    def extract(self, file):
-        """Import a CSV file from Think-or-Swim."""
-        filename = file.name
-        with open(filename) as infile:
-            sections = csv_utils.csv_split_sections_with_titles(csv.reader(infile))
-        if 0:
-            for section_name, rows in sections.items():
-                if re.search(r'\bSummary\b', section_name):
-                    continue
-                print('============================================================', section_name)
-                if not rows:
-                    continue
-                irows = iter(rows)
-                fieldnames = csv_utils.csv_clean_header(next(irows))
-                Tuple = collections.namedtuple('Row', fieldnames)
-                for row in irows:
-                    obj = Tuple(*row)
-                    print(obj)
+class Importer(beangulp.Importer):
 
-        return process_forex(sections['Forex Statements'], filename, self.config, flag=self.FLAG)
+    def __init__(self, filing, config):
+        self._account = filing
+        self.config = config
+        utils.validate_accounts(CONFIG, config)
+
+    def identify(self, filepath: str) -> bool:
+        return (utils.is_mimetype(filepath, 'text/csv') and
+                utils.search_file_regexp(filepath, '', nbytes=4096))
+
+    def account(self, filepath: str) -> data.Account:
+        return self._account
+
+    def filename(self, filepath: str) -> Optional[str]:
+        return 'thinkorswim_forex.{}'.format(path.basename(filepath))
+
+    def extract(self, filepath: str, existing: data.Entries) -> data.Entries:
+        return extract(self.config, filepath)
+
+
+def extract(config, filename):
+    """Import a CSV file from Think-or-Swim."""
+    with open(filename) as infile:
+        sections = csv_utils.csv_split_sections_with_titles(csv.reader(infile))
+    if 0:
+        for section_name, rows in sections.items():
+            if re.search(r'\bSummary\b', section_name):
+                continue
+            print('============================================================', section_name)
+            if not rows:
+                continue
+            irows = iter(rows)
+            fieldnames = csv_utils.csv_clean_header(next(irows))
+            Tuple = collections.namedtuple('Row', fieldnames)
+            for row in irows:
+                obj = Tuple(*row)
+                print(obj)
+
+    return process_forex(sections['Forex Statements'], filename, config,
+                         flag=flags.FLAG_OKAY)
 
 
 def process_forex(section, filename, config, flag='*'):
@@ -148,4 +174,3 @@ if __name__ == '__main__':
         'transfer'           : 'Assets:US:Ameritrade:Main:Cash',
     })
     testing.main(importer)
-
