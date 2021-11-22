@@ -4,12 +4,14 @@
 #
 #    make BEANMEAT=/path/to/root/of/downloaded/files
 
+# TODO(blais): Port to use Johnny.
+#	ameritrade/thinkorswim_csv.py
+#	tastyworks/tastyworks_csv.py
+#	ibkr/ibkr_xls.py
+#	ibkr/ibkr_flex_reports_csv.py
+
 IMPORTERS =					\
-	ameritrade/thinkorswim_csv.py		\
 	ameritrade/thinkorswim_forex.py		\
-	tastyworks/tastyworks_csv.py		\
-	ibkr/ibkr_xls.py			\
-	ibkr/ibkr_flex_reports_csv.py		\
 	oanda/oanda_csv.py			\
 	oanda/oanda_pdf.py			\
 	vanguard/vanguard_csv.py		\
@@ -17,9 +19,6 @@ IMPORTERS =					\
 	vanguard/vanguard_pdf.py		\
 	fidelity/fidelity_pdf.py		\
 	lendingclub/lendingclub_pdf.py
-
-IMPORTERS =					\
-	fidelity/fidelity_pdf.py
 
 test: $(IMPORTERS:.py=.test)
 
