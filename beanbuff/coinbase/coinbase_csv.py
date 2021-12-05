@@ -57,6 +57,10 @@ class Importer(beangulp.Importer):
         return extract(filepath, self._account)
 
 
+def leaf_for(currency: str) -> data.Account:
+    return 'Cash' if currency == 'USD' else currency
+
+
 def extract(filepath: str, root_account: str) -> data.Entries:
     table = (petl.fromcsv(filepath)
 
@@ -94,7 +98,8 @@ def extract(filepath: str, root_account: str) -> data.Entries:
     last_day = max(last_table.values('date')) + datetime.timedelta(days=1)
 
     balances = [
-        data.Balance(meta, last_day, f"{root_account}:{last_row.currency}",
+        data.Balance(meta, last_day,
+                     "{}:{}".format(root_account, leaf_for(last_row.currency)),
                      amount.Amount(last_row.balance, last_row.currency), None, None)
         for last_row in last_table.records()]
 
