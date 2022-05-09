@@ -1,12 +1,15 @@
 """OFX file format importer for investment accounts.
 """
+from decimal import Decimal
+from os import path
+from typing import Dict, Optional
 import datetime
 import itertools
+import pprint
 import re
-from typing import Dict, Optional
-from os import path
 
 import bs4
+import petl
 
 from beancount.core import account
 from beancount.core import amount
@@ -71,10 +74,11 @@ class Importer(beangulp.Importer):
         return 'vanguard.{}'.format(path.basename(filepath))
 
     def extract(self, filepath: str, existing: data.Entries) -> data.Entries:
-        return extract(filepath, self._account_id, self.config, flags.FLAG_OKAY)
+        entries, table = extract(filepath, self._account_id, self.config, flags.FLAG_OKAY)
+        print(table.lookallstr())
 
 
-def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -> data.Entries:
+def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -> [data.Entries, petl.Table]:
     """Extract transaction info from the given OFX file into transactions for the
     given account. This function returns a list of entries possibly partially
     filled entries.
@@ -114,14 +118,16 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
     if securities:
         securities_map = {security['uniqueid']: security
                           for security in securities}
+    pprint.pprint(securities_map)
 
     # For each statement.
     txn_counter = itertools.count()
+    rows = []
     for stmtrs in soup.find_all(re.compile('.*stmtrs$')):
         # account_type = stmtrs.find('accttype').text.strip()
         # bank_id = stmtrs.find('bankid').text.strip()
         acctid = stmtrs.find('acctid').text.strip()
-        if acctid != account_id:
+        if not re.match(account_id, acctid):
             continue
 
         # For each currency.
@@ -132,7 +138,9 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
             # Note: this was developed for Vanguard.
             for invtranlist in stmtrs.find_all(re.compile('(invtranlist)')):
 
+                # Process stock transactions.
                 for tran in invtranlist.find_all(re.compile('(buymf|sellmf|reinvest|buystock|sellstock|buyopt|sellopt|transfer)')):
+                    #dtposted = parse_ofx_time(soup_get(tran, 'dtposted')).date()
                     date = parse_ofx_time(soup_get(tran, 'dttrade')).date()
 
                     uniqueid = soup_get(tran, 'uniqueid')
@@ -141,6 +149,8 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
                     units = soup_get(tran, 'units', D)
                     unitprice = soup_get(tran, 'unitprice', D)
                     total = soup_get(tran, 'total', D)
+                    if total is None:
+                        total = units * unitprice
 
                     fileloc = data.new_metadata(filename, next(txn_counter))
                     payee = None
@@ -168,6 +178,22 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
                     if tferaction == 'OUT':
                         assert units < ZERO
 
+                    rows.append({
+                        'dttrade': parse_ofx_time(soup_get(tran, 'dttrade')).date(),
+                        'dtsettle': parse_ofx_time(soup_get(tran, 'dtsettle')).date(),
+                        'uniqueid': uniqueid,
+                        'fitit': soup_get(tran, 'fitid'),
+                        'units': units,
+                        'unitprice': unitprice,
+                        'total': total,
+                        'tran': tran.name.upper(),
+                        'incometype': incometype,
+                        'source': source,
+                        'memo': memo,
+                        'tferaction': tferaction,
+                        'subacctsec': soup_get(tran, 'subacctsec'),
+                        'postype': soup_get(tran, 'postype'),
+                    })
 
                     units_amount = amount.Amount(units, security)
                     cost = position.Cost(unitprice, currency, None, None)
@@ -177,8 +203,7 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
 
                     # Compute total amount.
                     if tran.name == 'transfer':
-                        assert total is None
-                        total = -(units * unitprice)
+                        total = -total
                     elif tran.name == 'buymf':
                         assert total is not None
                         assert abs(total + (units * unitprice)) < 0.005, abs(total - (units * unitprice))
@@ -204,12 +229,21 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
 
                 # Process the cash account transactions.
                 for tran in invtranlist.find_all(re.compile('(invbanktran)')):
-                    date = parse_ofx_time(soup_get(tran, 'dtposted')).date()
+                    date = dtposted = parse_ofx_time(soup_get(tran, 'dtposted')).date()
                     number = soup_get(tran, 'trnamt', D)
                     name = soup_get(tran, 'name')
                     memo = soup_get(tran, 'memo')
                     fitid = soup_get(tran, 'fitid')
                     subacctfund = soup_get(tran, 'subacctfund')
+
+                    rows.append({
+                        'date': date,
+                        'dttrade': dttrade,
+                        'trnamt': number,
+                        'name': name,
+                        'memo': memo,
+                        'subacctfund': subacctfund,
+                    })
 
                     assert subacctfund == 'CASH' # I don't know what the other transaction types could be.
 
@@ -246,7 +280,7 @@ def extract(filename: str, account_id: str, config: Dict[str, str], flag: str) -
                                                         None, None))
 
     new_entries.sort(key=lambda entry: entry.date)
-    return new_entries
+    return new_entries, petl.fromdicts(rows)
 
 
 def get_securities(soup):
@@ -266,8 +300,9 @@ def get_securities(soup):
         secid['name'] = secinfo.find('secname').contents[0]
         # Handle the Google collective trust accounts.
         if 'ticker' not in secid:
-            ticker = secid['ticker'] = secid['uniqueid']
-            assert re.match(r'VGI00\d+$', ticker), ticker
+            uniqueid = secid['uniqueid']
+            assert re.match(r'VGI00\d+$', uniqueid), secid
+            secid['ticker'] = re.sub("VGI00", "VGI", uniqueid)
         securities.append(secid)
 
     return securities
@@ -299,7 +334,7 @@ if __name__ == '__main__':
         'asset_account'       : 'Assets:US:Vanguard:{source}:{security}',
         'asset_balances'      : 'Assets:US:Vanguard',
         'cash_account'        : 'Assets:US:Vanguard:{source}:Cash',
-        'income_account'      : 'Income:US:Vanguard:{source}:{type}',
+        'income_account'      : 'Income:US:Vanguard:{source}:{security}:{type}',
         'income_match'        : 'Income:US:GoogleInc:{source}',
         'income_pnl'          : 'Income:US:Vanguard:Retire:PnL',
         'expenses_fees'       : 'Expenses:Financial:Fees:Vanguard',

@@ -12,6 +12,7 @@ import datetime
 import itertools
 import pprint
 import re
+import logging
 
 from beancount.core import account
 from beancount.core import account_types
