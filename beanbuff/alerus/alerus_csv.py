@@ -74,8 +74,8 @@ class Importer(beangulp.Importer):
                 [
                     data.Posting(
                         stock_account,
-                        amount.Amount(-r["Shares"], r["Ticker"]),
-                        position.Cost(-r["Price"], currency, None, None),
+                        amount.Amount(r["Shares"], r["Ticker"]),
+                        position.Cost(r["Price"], currency, None, None),
                         None,
                         None,
                         None,
