@@ -389,11 +389,9 @@ def extract_tables(filepath: str) -> List[petl.Table]:
         )
     instruments, transactions = tables
 
-    transactions = (
-        transactions
-        .convert(["Share Price", "Transaction Shares", "Dollar Amount"], D)
-        .convert(["Trade Date", "Run Date"], lambda x: parser.parse(x).date())
-        )
+    transactions = transactions.convert(
+        ["Share Price", "Transaction Shares", "Dollar Amount"], D
+    ).convert(["Trade Date", "Run Date"], lambda x: parser.parse(x).date())
 
     return [instruments, transactions]
 
