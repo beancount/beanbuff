@@ -31,13 +31,14 @@ from dateutil import tz
 
 
 def parse_datetime(string):
-    return datetime.datetime.strptime(string[:10], '%Y-%m-%d')
+    return datetime.datetime.strptime(string[:10], "%Y-%m-%d")
 
 
 class Source(source.Source):
     "Price extractor for Google Vanguard collective trusts."
 
     URL = "https://us-central1-bramp-projects.cloudfunctions.net/vanguard/{number}"
+
     def get_latest_price(self, ticker):
         match = re.match(r"VGI00(\d{4})", ticker)
         assert match, "Invalid ticker for importer {}: '{}'".format(self, ticker)
@@ -53,4 +54,3 @@ class Source(source.Source):
         time = time.astimezone(us_timezone)
 
         return source.SourcePrice(price, time, "USD")
-
