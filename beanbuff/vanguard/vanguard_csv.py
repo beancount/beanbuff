@@ -6,12 +6,17 @@ retirement and brokerage accounts.
 
 from decimal import Decimal
 from os import path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import csv
 import datetime
+import io
 import itertools
+import logging
 import pprint
 import re
+
+import petl
+from dateutil import parser
 
 from beancount.core import account
 from beancount.core import account_types
@@ -97,8 +102,6 @@ def _parse_brokerage_transactions(filename, config, reader):
 
     entries = []
     for row in reversed(list(reader)):
-        # pprint.pprint(row)
-
         # Clean up the row, parse types.
         for col in {
             "Accrued Interest",
@@ -362,6 +365,35 @@ class Importer(beangulp.Importer):
                 if entries:
                     new_entries.extend(entries)
         return new_entries
+
+
+def extract_tables(filepath: str) -> List[petl.Table]:
+    # Parse each of the sections through handlers.
+    tables = []
+    with open(filepath, encoding="iso-8859-1") as infile:
+        for section in csv_utils.iter_sections(infile):
+            header = next(section)
+            try:
+                handler = HANDLERS[header.rstrip()]
+            except KeyError:
+                raise ValueError("Invalid header: {}".format(header))
+            buf = io.StringIO()
+            buf.write(header)
+            [buf.write(line) for line in section]
+            tables.append(
+                petl.fromcsv(petl.MemorySource(buf.getvalue().encode("utf8")))
+            )
+    if not len(tables) == 2:
+        raise ValueError(
+            "Invalid CSV file with more than the expected number of sections."
+        )
+    instruments, transactions = tables
+
+    transactions = transactions.convert(
+        ["Share Price", "Transaction Shares", "Dollar Amount"], D
+    ).convert(["Trade Date", "Run Date"], lambda x: parser.parse(x).date())
+
+    return [instruments, transactions]
 
 
 if __name__ == "__main__":
