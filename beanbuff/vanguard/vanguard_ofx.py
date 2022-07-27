@@ -70,6 +70,7 @@ CONFIG = {
 
 Q1 = Decimal("0.1")
 Q2 = Decimal("0.01")
+Q5 = Decimal("0.00001")
 
 
 class Importer(beangulp.Importer):
@@ -100,96 +101,193 @@ class Importer(beangulp.Importer):
         return "vanguard.{}".format(path.basename(filepath))
 
     def extract(self, filepath: str, existing: data.Entries) -> data.Entries:
-        logging.info("Extracting from QFX")
-        entries, transactions, securities = extract(
+        logging.info("Extracting from OFX/QFX")
+        entries, transactions_ofx, securities = extract_from_ofx(
             filepath, self._account_id, self.config, flags.FLAG_OKAY
         )
-        transactions = petl.leftjoin(transactions, securities, "uniqueid")
+
+        # Join in the securities info.
+        transactions = petl.leftjoin(transactions_ofx, securities, "uniqueid").sort(
+            "dttrade"
+        )
+
+        # Infer the activity code solely from the OFX input.
+        transactions = infer_activity(transactions)
+
+        # Trim up some of the fat.
+        transactions = transactions.cutout(
+            "uniqueid", "fitit", "incometype", "subacctsec", "postype", "fiid"
+        )
 
         if 0:
-            transactions = petl.leftjoin(
-                transactions, _DESCRIPTION_MAP, key=["tran", "tferaction"]
-            )
-            transactions = transactions.cut(
-                "dttrade dtsettle ticker name units unitprice total tran tferaction description source memo postype".split()
-            )
+            print()
+            print(transactions.lookallstr())
 
-        # print(securities.lookallstr())
-        # print(transactions.lookallstr())
+        # Note: In July 2022, I made the parsing routine return *part of* the
+        # OFX file contents as a table and joined both the CSV and OFX files to
+        # see if the CSV was adding data that wasn't present in the OFX. It
+        # turns out the transaction type is more explicit in the CVS file but
+        # can be inferred solely from the OFX file, so decided we'd be better
+        # using just the OFX file (better precision in the reported numbers).
+        # The code is still here though. It could be an idea one day to return
+        # only tables from the extract_from_ofx() and create the transactions in
+        # a separate step. Keeping it as is for now.
+        return entries
 
-        csv_filepath = re.sub(r"\.qfx", ".csv", filepath).lower()
-        if path.exists(csv_filepath):
-            logging.info("Extracting from CSV")
-            from . import vanguard_csv
 
-            balances, transactions_csv = vanguard_csv.extract_tables(csv_filepath)
-            # for table in tables:
-            #     print(table.lookallstr())
-            # print()
-            # print(transactions_csv.lookallstr())
+def infer_activity(transactions_ofx: petl.Table) -> petl.Table:
+    # Create a mapping from the data we have in the OFX file only, so
+    # that we never need use the CSV file if not available.
+    description_map = petl.wrap(
+        [
+            ["tran", "tferaction", "memo", "activity", "description"],
+            [
+                "REINVEST",
+                None,
+                "Price as of date based on closing price",
+                "ACT_REINVEST",
+                "Dividends on Equity Investments",
+            ],
+            [
+                "TRANSFER",
+                "IN",
+                "Price as of date based on closing price",
+                "ACT_TRANSFER_IN",
+                "Plan Initiated TransferIn",
+            ],
+            [
+                "TRANSFER",
+                "OUT",
+                "Investment Expense",
+                "ACT_FEE",
+                "Fee (Investment Expense)",
+            ],
+            [
+                "TRANSFER",
+                "OUT",
+                "Price as of date based on closing price",
+                "ACT_TRANSFER_OUT",
+                "Plan Initiated TransferOut",
+            ],
+        ]
+    ).lookupone(["tran", "tferaction", "memo"])
 
-            transactions = petl.leftjoin(
-                transactions.addfield(
-                    "key",
-                    lambda r: (
-                        r["dttrade"],
-                        r["dtsettle"],
-                        abs(r["unitprice"].quantize(Q2)),
-                        abs(r["units"].quantize(Q1)),
-                        abs(r["total"].quantize(Q2)),
-                    ),
-                ),
-                transactions_csv.addfield(
-                    "key",
-                    lambda r: (
-                        r["Trade Date"],
-                        r["Run Date"],
-                        abs(r["Share Price"].quantize(Q2)),
-                        abs(r["Transaction Shares"].quantize(Q1)),
-                        abs(r["Dollar Amount"].quantize(Q2)),
-                    ),
-                ),
-                key="key",
-            ).cutout("key")
-
-            transactions = transactions.cut(
-                "dttrade",
-                "dtsettle",
-                # "uniqueid",
-                "Account Number",
-                "ticker",
-                "name",
-                "source",
-                "tran",
-                "tferaction",
-                "memo",
-                # "incometype",
-                # "subacctsec",
-                # "postype",
-                "Transaction Description",
-                "units",
-                "unitprice",
-                "total",
-                # "Trade Date",
-                # "Run Date",
-                "fitit",
-                "Transaction Activity",
-                # "Investment Name",
-                # "Share Price",
-                # "Transaction Shares",
-                # "Dollar Amount",
-            )
-
-        print()
-        print(transactions.lookallstr())
-
-        table = transactions.cut(
-            "tran", "tferaction", "memo", "Transaction Description"
+    if 0:
+        txntypes = transactions.cut(
+            "tran",
+            "tferaction",
+            "memo",
+            "Transaction Activity",
+            "Transaction Description",
         ).distinct()
-        print(table.lookallstr())
+        print(txntypes.lookallstr())
+        # tran      tferaction  memo                                     Transaction Activity  Transaction Description
+        # REINVEST  None        Price as of date based on closing price  219004                Dividends on Equity Investments
+        # TRANSFER  IN          Price as of date based on closing price  382007                Plan Initiated TransferIn
+        # TRANSFER  OUT         Investment Expense                       245026                Fee
+        # TRANSFER  OUT         Price as of date based on closing price  382021                Plan Initiated TransferOut
+
+    def get_description(rec):
+        memo = rec["memo"]
+        if memo == "Price as of date based on closing price":
+            memo = None
+        description = rec["Transaction Description"]
+        if memo:
+            description = f"{description} ({memo})"
+        return description
+
+    return (
+        transactions_ofx.addfield(
+            "activity",
+            lambda r: description_map[(r["tran"], r["tferaction"], r["memo"])][-2],
+        )
+        .addfield(
+            "description",
+            lambda r: description_map[(r["tran"], r["tferaction"], r["memo"])][-1],
+        )
+        .cutout("tran", "tferaction", "memo")
+    )
 
 
-def extract(
+def try_join_csv_file(transactions_ofx: petl.Table, filepath: str):
+    # Look for an accompanying CSV file and join it if present to see if
+    # the contents are in any way complementary to the OFX one (is it
+    # worth downloading it and joining the fields? (Answer: No)).
+    dirname, basename = path.split(filepath)
+    csv_filepath = path.join(dirname, re.sub(r"\.qfx", ".csv", basename).lower())
+    if path.exists(csv_filepath):
+        logging.info("Extracting from CSV")
+        from beanbuff.vanguard import vanguard_csv
+        balances, transactions_csv = vanguard_csv.extract_tables(csv_filepath)
+        transactions_both = join_csv_file(transactions_ofx, transactions_csv)
+        print()
+        print(transactions_both.lookallstr())
+
+
+def join_csv_file(transactions: petl.Table, transactions_csv: petl.Table) -> petl.Table:
+    """Read and join the CSV file with the OFX-derived table."""
+    # for table in tables:
+    #     print(table.lookallstr())
+    # print()
+    # print(transactions_csv.lookallstr())
+
+    # Join the OFX and CSV contents based on some reliable common fields.
+    transactions = petl.leftjoin(
+        transactions.addfield(
+            "key",
+            lambda r: (
+                r["dttrade"],
+                r["dtsettle"],
+                abs(r["unitprice"].quantize(Q2)),
+                abs(r["units"].quantize(Q1)),
+                abs(r["total"].quantize(Q2)),
+            ),
+        ),
+        transactions_csv.addfield(
+            "key",
+            lambda r: (
+                r["Trade Date"],
+                r["Run Date"],
+                abs(r["Share Price"].quantize(Q2)),
+                abs(r["Transaction Shares"].quantize(Q1)),
+                abs(r["Dollar Amount"].quantize(Q2)),
+            ),
+        ),
+        key="key",
+    ).cutout("key")
+
+    # Validate some invariants.
+    def assert_equal(value1, value2):
+        equal = value1 == value2
+        if not equal:
+            raise ValueError("Values differ: '{}' != '{}'".format(value1, value2))
+        return equal
+
+    list(
+        transactions.addfield(
+            "_dttrade",
+            lambda r: assert_equal(r["dttrade"], r["Trade Date"]),
+        )
+        .addfield(
+            "_dtsettle",
+            lambda r: assert_equal(r["dtsettle"], r["Run Date"]),
+        )
+        .addfield(
+            "_total",
+            lambda r: assert_equal(abs(r["total"]), abs(r["Dollar Amount"])),
+        )
+        .addfield(
+            "_unitprice",
+            lambda r: assert_equal(
+                r["unitprice"].quantize(Q5), r["Share Price"].quantize(Q5)
+            ),
+        )
+    )
+
+    return transactions
+
+
+def extract_from_ofx(
     filename: str, account_id: str, config: Dict[str, str], flag: str
 ) -> [data.Entries, petl.Table]:
     """Extract transaction info from the given OFX file into transactions for the
@@ -385,7 +483,7 @@ def extract(
                     rows.append(
                         {
                             "date": date,
-                            "dttrade": dttrade,
+                            "dttrade": dtposted,
                             "trnamt": number,
                             "name": name,
                             "memo": memo,
@@ -452,7 +550,8 @@ def extract(
                         )
 
     new_entries.sort(key=lambda entry: entry.date)
-    return new_entries, petl.fromdicts(rows), securities
+    transactions = petl.fromdicts(rows).sort("dttrade")
+    return new_entries, transactions, securities
 
 
 def get_securities(soup):
