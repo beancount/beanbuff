@@ -173,6 +173,14 @@ def create_transaction(group: Iterable[Record], root_account: str) -> data.Trans
             postings.append(
                 data.Posting(f"{root_account}:Cash", units, None, None, None, None))
 
+        # Withdrawal.
+        elif row.type == 'withdrawal':
+            txn = txn._replace(narration=row.type)
+            postings.append(
+                data.Posting("Assets:Transfer", -units, None, None, None, None))
+            postings.append(
+                data.Posting(f"{root_account}:Cash", units, None, None, None, None))
+
         else:
             raise ValueError(f"Row type {type} is not supported.")
 
